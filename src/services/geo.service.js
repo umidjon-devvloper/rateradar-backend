@@ -46,21 +46,30 @@ export async function getCountries() {
 export async function searchCities(query, countryCode = '', limit = 10) {
   if (!query || query.length < 2) return [];
 
-  if (hasLocalCities(countryCode)) {
+  // CITIES_SOURCE='api' bo'lsa lokal fayllarni o'tkazib yuboramiz (VPS rejimi).
+  // 'local' bo'lsa API'ga umuman bormaymiz. 'auto' — lokal bor bo'lsa o'shani.
+  if (env.CITIES_SOURCE !== 'api' && hasLocalCities(countryCode)) {
     return searchLocalCities(query, countryCode, limit);
   }
+  if (env.CITIES_SOURCE === 'local') return [];
 
   const key = `cities:${countryCode}:${query.toLowerCase()}`;
   const c = cached(key);
   if (c) return c;
   try {
-    const r = await axios.get('http://api.geonames.org/searchJSON', {
+    const r = await axios.get('https://secure.geonames.org/searchJSON', {
       params: {
         q: query, country: countryCode || undefined, featureClass: 'P',
         maxRows: limit, username: env.GEONAMES_USERNAME, orderby: 'population',
       },
       timeout: 10000,
     });
+    if (r.data?.status) {
+      // GeoNames xatolar JSON ichida {status:{message,value}} ko'rinishida keladi
+      // (masalan demo akkaunt limiti yoki noto'g'ri username).
+      console.error('GeoNames API xato:', r.data.status.message);
+      return [];
+    }
     const cities = (r.data?.geonames || []).map((g) => ({
       name: g.name, country: g.countryName, countryCode: g.countryCode,
       region: g.adminName1 || '', population: g.population,

@@ -30,6 +30,12 @@ const schema = z.object({
   // https://yandex.com/maps-api/products/geosearch-api (JS API kalitidan alohida).
   YANDEX_GEOSEARCH_API_KEY: z.string().optional(),
   GEONAMES_USERNAME: z.string().default('demo'),
+  // Shahar qidiruvi manbasi:
+  //   'auto'  — lokal data/ fayli bo'lsa o'shani, bo'lmasa GeoNames API (default)
+  //   'api'   — har doim api.geonames.org (lokal fayllar bo'lsa ham e'tiborsiz)
+  //   'local' — faqat lokal fayllar (API'ga umuman bormaydi)
+  // VPS'da 1.7GB dump yuklamaslik uchun 'api' qo'ying.
+  CITIES_SOURCE: z.enum(['auto', 'api', 'local']).default('auto'),
   GOOGLE_PLACES_API_KEY: z.string().optional(),
   MAKCORPS_API_KEY: z.string().optional(),
   ADMIN_EMAIL: z.string().email().default('admin@rateradar.com'),
