@@ -1,0 +1,146 @@
+import Hotel from "../models/Hotel.js";
+import Competitor from "../models/Competitor.js";
+import Review from "../models/Review.js";
+import {
+  analyzeReview,
+  getPriceRecommendations,
+  summarizeReviews,
+  isAIEnabled,
+} from "../services/openai.service.js";
+import { chatSupport } from "../services/gemini.service.js";
+
+export function getAIStatus(req, res) {
+  res.json({ enabled: isAIEnabled(), model: "gpt-4o-mini" });
+}
+
+export async function aiPriceRecommendations(req, res, next) {
+  try {
+    if (!isAIEnabled())
+      return res.status(503).json({ error: "OpenAI API kaliti sozlanmagan" });
+
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: "Hotel topilmadi" });
+
+    // Kesh — token tejash uchun. refresh=true bo'lmasa va kesh mavjud bo'lsa,
+    // AI'ga qayta so'rov yubormaymiz (foydalanuvchi "Yangilash" bosgandagina).
+    const refresh = req.query.refresh === "true";
+    if (!refresh && hotel.aiPriceRecs?.recommendations?.length) {
+      return res.json({ ...hotel.aiPriceRecs, cached: true, asOf: hotel.aiPriceRecsAt });
+    }
+
+    const competitors = await Competitor.find({
+      ownerHotelId: hotel._id,
+      isActive: true,
+    }).limit(10);
+    const bestCompPrice = (c) => {
+      const get = (k) => c.latestPrices?.get?.(k) || 0;
+      return get("bookingcom") || get("booking") || get("agoda") ||
+        get("expedia") || get("hotelscom") || get("tripcom") ||
+        get("tripadvisorcom") || get("viocom") || 0;
+    };
+    const compData = competitors.map((c) => ({
+      name: c.name,
+      price: bestCompPrice(c),
+      stars: c.stars || 0,
+      distanceKm: c.distanceKm || 0,
+    }));
+
+    const prices = compData.map((c) => c.price).filter((p) => p > 0);
+    const marketAvg = prices.length
+      ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length)
+      : 0;
+
+    const lang = req.query.lang || "uz";
+
+    const result = await getPriceRecommendations({
+      myHotel: hotel.name,
+      myPrice: hotel.currentPrice || 0,
+      competitors: compData,
+      marketAvg,
+      lang,
+    });
+
+    // Natijani keshlaymiz (faqat haqiqiy tavsiya bo'lsa).
+    if (result?.recommendations?.length) {
+      const now = new Date();
+      await Hotel.updateOne(
+        { _id: hotel._id },
+        { $set: { aiPriceRecs: result, aiPriceRecsAt: now } },
+      ).catch(() => {});
+      return res.json({ ...result, cached: false, asOf: now });
+    }
+
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function aiSummarizeReviews(req, res, next) {
+  try {
+    if (!isAIEnabled())
+      return res.status(503).json({ error: "OpenAI API kaliti sozlanmagan" });
+
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: "Hotel topilmadi" });
+
+    const lang = req.query.lang || "uz";
+    const reviews = await Review.find({ ownerHotelId: hotel._id })
+      .sort({ publishedAt: -1 })
+      .limit(20)
+      .lean();
+
+    if (!reviews.length) {
+      return res.json({
+        strengths: [],
+        weaknesses: [],
+        summary:
+          lang === "uz"
+            ? "Hali sharhlar mavjud emas."
+            : lang === "ru"
+              ? "Отзывов пока нет."
+              : "No reviews yet.",
+        recommendedActions: [],
+      });
+    }
+
+    const result = await summarizeReviews(reviews, lang);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function aiAnalyzeSingleReview(req, res, next) {
+  try {
+    if (!isAIEnabled())
+      return res.status(503).json({ error: "OpenAI API kaliti sozlanmagan" });
+
+    const { text, lang = "uz" } = req.body;
+    if (!text || !text.trim())
+      return res.status(400).json({ error: "text maydoni talab etiladi" });
+
+    const result = await analyzeReview(text.trim(), lang);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function aiChatSupport(req, res, next) {
+  try {
+    const { messages } = req.body;
+    if (!Array.isArray(messages) || !messages.length) {
+      return res.status(400).json({ error: "messages talab etiladi" });
+    }
+    // Xavfsizlik: maksimum 20 xabar, har biri 500 belgidan oshmasin
+    const safe = messages.slice(-20).map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m.content || '').slice(0, 500),
+    }));
+    const reply = await chatSupport(safe);
+    res.json({ reply });
+  } catch (err) {
+    next(err);
+  }
+}
