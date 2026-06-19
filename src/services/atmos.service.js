@@ -215,20 +215,32 @@ export async function reverse({ transactionId, reason = 'refund' }) {
   return { transaction_id: data.transaction_id, raw: data };
 }
 
+// Toshkent vaqti (UTC+5, DST yo'q) bo'yicha "yyyy-MM-ddTHH:mm:ss" sana.
+// minFromNow — necha daqiqa keyin (invoys muddati).
+function atmosLocalDate(minFromNow = 0) {
+  const d = new Date(Date.now() + 5 * 3600 * 1000 + minFromNow * 60 * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return (
+    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}` +
+    `T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
+  );
+}
+
 // ─── To'lov sahifasi (invoice) — Visa/MC/UzCard/Humo, 3DS ATMOS tomonida ──
 /**
  * ATMOS to'lov sahifasi yaratadi. Mijoz qaytgan `url`ga yo'naltiriladi va
  * o'sha sahifada istalgan karta (UzCard/Humo/Visa/Mastercard) bilan to'laydi.
  * @returns {Promise<{url, payment_id, token, raw}>}
  */
-export async function createInvoice({ amount, account, requestId, successUrl, items, expirationTime = 30 }) {
+export async function createInvoice({ amount, account, requestId, successUrl, items, expirationMinutes = 60 }) {
   const body = {
     request_id: String(requestId),
     store_id: Number(env.ATMOS_STORE_ID),
     account: String(account),
     amount, // tiyinda
     success_url: successUrl,
-    expiration_time: expirationTime, // daqiqada
+    // ATMOS yyyy-MM-dd'T'HH:mm:ss formatini kutadi (Toshkent vaqti, UTC+5).
+    expiration_date: atmosLocalDate(expirationMinutes),
     items: items || [],
   };
   const data = await authPost('/checkout/invoice/create', body);
