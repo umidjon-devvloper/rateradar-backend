@@ -25,12 +25,22 @@ const paymentSchema = new mongoose.Schema(
     amount: { type: Number, required: true }, // tiyinda (1 so'm = 100 tiyin)
     currency: { type: String, default: 'UZS' },
 
-    // ATMOS tomoni
+    // To'lov kanali:
+    //   card    — saytda karta + SMS-OTP (UzCard/Humo)
+    //   invoice — ATMOS to'lov sahifasi (UzCard/Humo/Visa/Mastercard, 3DS)
+    channel: { type: String, enum: ['card', 'invoice'], default: 'card' },
+
+    // ATMOS tomoni (card kanali)
     account: { type: String, required: true, unique: true, index: true },
     atmosTransactionId: { type: Number, default: null, index: true },
     atmosSuccessTransId: { type: Number, default: null }, // bekor qilish (reverse) uchun
     cardPan: { type: String, default: null }, // maskalangan, masalan 986009******1840
     ofdUrl: { type: String, default: null }, // fiskal chek havolasi
+
+    // ATMOS tomoni (invoice kanali)
+    invoicePaymentId: { type: Number, default: null, index: true }, // checkout payment_id
+    invoiceToken: { type: String, default: null },
+    checkoutUrl: { type: String, default: null }, // ATMOS to'lov sahifasi havolasi
 
     status: {
       type: String,

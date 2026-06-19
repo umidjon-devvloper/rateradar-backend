@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { customAlphabet } from 'nanoid';
 import Payment from '../models/Payment.js';
 import User from '../models/User.js';
+import { env } from '../config/env.js';
 import { PURCHASABLE_PLANS, getPlan, planAmountTiyin } from '../config/plans.js';
 import * as atmos from '../services/atmos.service.js';
 
@@ -65,6 +66,69 @@ export async function createPayment(req, res, next) {
       amountUzs: planCfg.priceUzs,
       transactionId: transaction_id,
       status: payment.status,
+    });
+  } catch (err) {
+    handleErr(err, next);
+  }
+}
+
+const invoiceSchema = z.object({
+  plan: z.enum(['starter', 'pro']),
+  successUrl: z.string().url().optional(), // qaytish manzili (frontend origin + /billing)
+});
+
+/**
+ * POST /api/payments/invoice   { plan, successUrl? }
+ * ATMOS to'lov sahifasini yaratadi — Visa/MC/UzCard/Humo, 3DS ATMOS tomonida.
+ * Mijoz qaytgan `url`ga yo'naltiriladi.
+ */
+export async function createInvoice(req, res, next) {
+  try {
+    const { plan, successUrl } = invoiceSchema.parse(req.body);
+    const planCfg = getPlan(plan);
+    const amount = planAmountTiyin(plan);
+
+    const account = genAccount();
+    const payment = await Payment.create({
+      user: req.user._id,
+      plan,
+      amount,
+      account,
+      channel: 'invoice',
+      status: 'created',
+    });
+
+    // To'lovdan keyin mijoz shu manzilga qaytadi — qaysi to'lov ekanini ?pay bilan bildiramiz.
+    const base = (successUrl || `${env.CLIENT_URL}/billing`).replace(/\/$/, '');
+    const returnUrl = `${base}?pay=${payment._id}`;
+
+    const { url, payment_id, token, raw } = await atmos.createInvoice({
+      amount,
+      account,
+      requestId: account, // noyob
+      successUrl: returnUrl,
+      items: [
+        {
+          items_id: '1',
+          name: `RateRadar ${planCfg.name}`,
+          amount,
+          quantity: 1,
+          details: [{ name: 'package_code', values: '-' }],
+        },
+      ],
+    });
+
+    payment.invoicePaymentId = payment_id ?? null;
+    payment.invoiceToken = token ?? null;
+    payment.checkoutUrl = url ?? null;
+    payment.raw = { invoiceCreate: raw };
+    await payment.save();
+
+    res.status(201).json({
+      paymentId: payment._id,
+      url,
+      plan,
+      amountUzs: planCfg.priceUzs,
     });
   } catch (err) {
     handleErr(err, next);
@@ -204,6 +268,24 @@ export async function listMyPayments(req, res, next) {
 export async function getPayment(req, res, next) {
   try {
     const payment = await findOwnPayment(req.params.id, req.user._id);
+
+    // Invoice kanali — ATMOS to'lov sahifasidan qaytgach holatni so'raymiz.
+    if (payment.channel === 'invoice' && payment.status !== 'paid' && payment.invoicePaymentId) {
+      try {
+        const inv = await atmos.getInvoice({ paymentId: payment.invoicePaymentId });
+        if (inv.success && payment.status !== 'paid') {
+          payment.status = 'paid';
+          payment.paidAt = new Date();
+          await payment.save();
+          await activateSubscription(payment.user, payment.plan);
+        } else if (inv.final && !inv.success) {
+          payment.status = 'failed';
+          await payment.save();
+        }
+      } catch {
+        /* status so'rovi xato bersa, mavjud holatni qaytaveramiz */
+      }
+    }
 
     // Timeout / noaniq holatda ATMOS'dan tekshirib, holatni sinxronlaymiz.
     if (payment.status === 'otp_sent' && payment.atmosTransactionId) {

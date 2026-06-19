@@ -215,6 +215,57 @@ export async function reverse({ transactionId, reason = 'refund' }) {
   return { transaction_id: data.transaction_id, raw: data };
 }
 
+// ─── To'lov sahifasi (invoice) — Visa/MC/UzCard/Humo, 3DS ATMOS tomonida ──
+/**
+ * ATMOS to'lov sahifasi yaratadi. Mijoz qaytgan `url`ga yo'naltiriladi va
+ * o'sha sahifada istalgan karta (UzCard/Humo/Visa/Mastercard) bilan to'laydi.
+ * @returns {Promise<{url, payment_id, token, raw}>}
+ */
+export async function createInvoice({ amount, account, requestId, successUrl, items, expirationTime = 30 }) {
+  const body = {
+    request_id: String(requestId),
+    store_id: Number(env.ATMOS_STORE_ID),
+    account: String(account),
+    amount, // tiyinda
+    success_url: successUrl,
+    expiration_time: expirationTime, // daqiqada
+    items: items || [],
+  };
+  const data = await authPost('/checkout/invoice/create', body);
+  // Bu endpoint result o'rniga status.code "OK"/"0" qaytaradi.
+  const code = data?.status?.code;
+  if (code !== undefined && code !== 'OK' && String(code) !== '0') {
+    const e = new Error(`ATMOS invoice yaratilmadi: ${data?.status?.description || code}`);
+    e.status = 400;
+    e.atmos = { code, raw: data };
+    throw e;
+  }
+  return {
+    url: data.url,
+    payment_id: data.payment_id,
+    token: data.token,
+    raw: data,
+  };
+}
+
+/**
+ * To'lov sahifasi (invoice) holatini so'rash.
+ * payment_id YOKI token bo'yicha (ikkalasi birga emas).
+ * @returns {Promise<{state, success, final, amount, account, raw}>}
+ */
+export async function getInvoice({ paymentId, token }) {
+  const body = paymentId ? { payment_id: Number(paymentId) } : { token };
+  const data = await authPost('/checkout/invoice/get', body);
+  return {
+    state: data.state ?? null, // SUCCESS, ...
+    success: data.success === true,
+    final: data.final === true,
+    amount: data.amount ?? null,
+    account: data.account ?? null,
+    raw: data,
+  };
+}
+
 // ─── Callback imzosini tekshirish ────────────────────────────────────
 /**
  * Callback sign formulasi (ATMOS hujjati):

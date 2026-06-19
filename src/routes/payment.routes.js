@@ -3,6 +3,7 @@ import { requireAuth } from '../middleware/auth.js';
 import {
   listPlans,
   createPayment,
+  createInvoice,
   submitCard,
   confirmPayment,
   resendOtp,
@@ -71,6 +72,28 @@ router.use(requireAuth);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/create', createPayment);
+
+/**
+ * @openapi
+ * /payments/invoice:
+ *   post:
+ *     tags: [Payments]
+ *     summary: ATMOS to'lov sahifasi (Visa/MC/UzCard/Humo) — url qaytadi
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [plan]
+ *             properties:
+ *               plan: { type: string, enum: [starter, pro] }
+ *               successUrl: { type: string, description: "Qaytish manzili (ixtiyoriy)" }
+ *     responses:
+ *       201: { description: "{ paymentId, url } — url'ga yo'naltiriladi" }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.post('/invoice', createInvoice);
 
 /**
  * @openapi
