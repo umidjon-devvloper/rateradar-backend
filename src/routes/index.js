@@ -7,6 +7,7 @@ import aiRoutes from "./ai.routes.js";
 import notificationRoutes from "./notification.routes.js";
 import reviewRoutes from "./review.routes.js";
 import pricesRoutes from "./prices.routes.js";
+import paymentRoutes from "./payment.routes.js";
 import hotelServiceSsoRoutes from "./hotelServiceSso.routes.js";
 
 const router = Router();
@@ -38,6 +39,7 @@ router.use("/ai", aiRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/reviews", reviewRoutes);
 router.use("/prices", pricesRoutes);
+router.use("/payments", paymentRoutes);
 // Mehmonxona-xizmati SSO ko'prigi (/api/hotel-service/sso). Qolgan
 // /api/hotel-service/* marshrutlari CommonJS modulda (app.js'da ulanadi).
 router.use("/hotel-service", hotelServiceSsoRoutes);

@@ -49,6 +49,16 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+
+  // ─── ATMOS to'lov shlyuzi (UzCard / Humo) ────────────────────────────
+  // Kalitlar ATMOS tomonidan merchant ro'yxatdan o'tgach beriladi.
+  // Test (sandbox) kartalar ham shu kalitlar bilan ishlaydi.
+  ATMOS_BASE_URL: z.string().default('https://apigw.atmos.uz'),
+  ATMOS_CONSUMER_KEY: z.string().optional(),
+  ATMOS_CONSUMER_SECRET: z.string().optional(),
+  ATMOS_STORE_ID: z.string().optional(),       // merchant (store) id
+  ATMOS_TERMINAL_ID: z.string().optional(),    // ixtiyoriy — 1 terminal bo'lsa shart emas
+  ATMOS_API_KEY: z.string().optional(),        // Callback imzosini (sign) tekshirish uchun
 });
 
 const parsed = schema.safeParse(process.env);

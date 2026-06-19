@@ -19,6 +19,7 @@ const userSchema = new mongoose.Schema(
     city: { type: String, default: "" },
     lang: { type: String, enum: ["uz", "en", "ru"], default: "uz" },
     plan: { type: String, enum: ["free", "starter", "pro"], default: "free" },
+    planExpiresAt: { type: Date, default: null },
     hotelId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Hotel",
