@@ -35,12 +35,24 @@ function reqHeaders() {
 }
 
 async function taGet(path, params = {}) {
-  const r = await axios.get(`${BASE}${path}`, {
-    params: { key: env.TRIPADVISOR_API_KEY, language: 'en', ...params },
-    headers: reqHeaders(),
-    timeout: TIMEOUT,
-  });
-  return r.data;
+  try {
+    const r = await axios.get(`${BASE}${path}`, {
+      params: { key: env.TRIPADVISOR_API_KEY, language: 'en', ...params },
+      headers: reqHeaders(),
+      timeout: TIMEOUT,
+    });
+    return r.data;
+  } catch (err) {
+    // TripAdvisor xato javobining ASL sababini logga chiqaramiz (IP/referer/kalit).
+    const status = err.response?.status;
+    const body = err.response?.data;
+    const taMsg = body?.error?.message || body?.message || (typeof body === 'string' ? body.slice(0, 200) : '');
+    console.warn(`[tripadvisor] ${status || 'ERR'} ${path} — ${taMsg || err.message}`);
+    // Boyitilgan xatoni yuqoriga uzatamiz (controller foydalanuvchiga ko'rsatadi).
+    err.taStatus = status;
+    err.taMessage = taMsg;
+    throw err;
+  }
 }
 
 // ─── Lokatsiya qidirish → location_id ────────────────────────────────

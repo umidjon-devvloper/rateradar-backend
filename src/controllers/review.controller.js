@@ -542,9 +542,11 @@ export async function scrapeTripadvisor(req, res, next) {
       tripAdvisor: fresh?.tripAdvisor || null,
     });
   } catch (err) {
-    if (err.response?.status === 401 || err.response?.status === 403) {
+    const status = err.taStatus || err.response?.status;
+    if (status === 401 || status === 403) {
+      const reason = err.taMessage ? ` — ${err.taMessage}` : '';
       return res.status(502).json({
-        error: 'TripAdvisor 401/403 — kalit yoki IP whitelist (VPS IP) tekshiring',
+        error: `TripAdvisor ${status}: kalit yoki IP/referer whitelist (VPS IP) tekshiring${reason}`,
       });
     }
     next(err);
