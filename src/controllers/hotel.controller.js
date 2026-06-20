@@ -28,11 +28,32 @@ const createHotelSchema = z.object({
   otaChannels: z.array(z.string()).optional(),
 });
 
+// Regex maxsus belgilarini ekranlaydi (exact, case-insensitive moslik uchun).
+const escapeRegex = (s) => String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 export async function createHotel(req, res, next) {
   try {
     const data = createHotelSchema.parse(req.body);
-    // Multi-hotel: bitta foydalanuvchi bir nechta hotel qo'sha oladi.
-    // Eski "allaqachon hotel mavjud" cheklovi olib tashlandi.
+    // Multi-hotel: bitta foydalanuvchi bir nechta TURLI hotel qo'sha oladi.
+    // Lekin BIR XIL mehmonxona (nom+shahar yoki osm/place ID bo'yicha) ikki marta
+    // ro'yxatdan o'tolmaydi — boshqa egasi yoki o'zi tomonidan ham.
+    const dup = [];
+    if (data.osmId) dup.push({ osmId: data.osmId });
+    if (data.googlePlaceId) dup.push({ googlePlaceId: data.googlePlaceId });
+    dup.push({
+      name: new RegExp(`^${escapeRegex(data.name)}$`, 'i'),
+      city: new RegExp(`^${escapeRegex(data.city || '')}$`, 'i'),
+    });
+
+    const existing = await Hotel.findOne({ $or: dup, isActive: true });
+    if (existing) {
+      const mine = String(existing.userId) === String(req.user._id);
+      return res.status(409).json({
+        error: mine
+          ? "Siz bu mehmonxonani allaqachon qo'shgansiz"
+          : "Bu mehmonxona allaqachon ro'yxatdan o'tgan",
+      });
+    }
 
     const hotel = await Hotel.create({
       userId: req.user._id,
