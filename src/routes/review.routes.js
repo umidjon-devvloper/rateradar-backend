@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveHotel } from '../middleware/resolveHotel.js';
-import { listReviews, markReviewSeen, markAllReviewsSeen, scrapeReviews, generateResponse, scrapeApifyReviews } from '../controllers/review.controller.js';
+import { listReviews, markReviewSeen, markAllReviewsSeen, scrapeReviews, generateResponse, scrapeApifyReviews, scrapeTripadvisor } from '../controllers/review.controller.js';
 
 const router = Router();
 
@@ -49,6 +49,20 @@ router.post('/scrape', scrapeReviews);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/scrape-apify', scrapeApifyReviews);
+
+/**
+ * @openapi
+ * /reviews/scrape-tripadvisor:
+ *   post:
+ *     tags: [Reviews]
+ *     summary: TripAdvisor Content API orqali reyting/ranking/sharhlar
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *     responses:
+ *       200: { description: TripAdvisor ma'lumotlari }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.post('/scrape-tripadvisor', scrapeTripadvisor);
 
 /**
  * @openapi

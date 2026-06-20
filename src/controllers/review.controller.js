@@ -11,6 +11,7 @@ import {
   hasApify,
 } from '../services/apify.service.js';
 import { hasYandex, findYandexOrg } from '../services/yandex.service.js';
+import { hasTripAdvisorContent, syncTripAdvisor } from '../services/tripadvisorContent.service.js';
 
 function ratingToSentiment(rating) {
   if (rating >= 4) return 'positive';
@@ -181,7 +182,11 @@ export async function listReviews(req, res, next) {
       yandexUrl:  flatYandexUrl(hotel.otaUrls),
     } : null;
 
-    res.json({ reviews, total, page, limit, stats, unreadCount, apifyProvider });
+    // TripAdvisor keshi + kalit holati (faqat 1-sahifada)
+    const tripAdvisor = page === 1 ? (hotel.tripAdvisor || null) : null;
+    const tripadvisorConfigured = page === 1 ? hasTripAdvisorContent() : undefined;
+
+    res.json({ reviews, total, page, limit, stats, unreadCount, apifyProvider, tripAdvisor, tripadvisorConfigured });
   } catch (err) {
     next(err);
   }
@@ -500,6 +505,50 @@ export async function scrapeApifyReviews(req, res, next) {
       },
     });
   } catch (err) { next(err); }
+}
+
+/**
+ * POST /reviews/scrape-tripadvisor — TripAdvisor rasmiy Content API orqali
+ * reyting, ranking, sharhlar soni va oxirgi 5 sharhni olib keladi.
+ * ?reset=true — keshlangan location_id'ni unutib qaytadan qidiradi.
+ */
+export async function scrapeTripadvisor(req, res, next) {
+  try {
+    if (!hasTripAdvisorContent()) {
+      return res.status(503).json({ error: 'TRIPADVISOR_API_KEY .env da sozlanmagan' });
+    }
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+
+    // reset — keshlangan location_id'ni tozalab qayta moslashtirish
+    if (req.query.reset === 'true' && hotel.tripAdvisor?.locationId) {
+      await Hotel.updateOne({ _id: hotel._id }, { $set: { 'tripAdvisor.locationId': '' } });
+      hotel.tripAdvisor = { ...(hotel.tripAdvisor || {}), locationId: '' };
+    }
+
+    // Oynadan tashqari eski TripAdvisor sharhlarini tozalaymiz
+    await purgeOldReviews(hotel._id, 'TripAdvisor');
+
+    const result = await syncTripAdvisor(hotel, { windowDays: REVIEW_WINDOW_DAYS });
+    if (!result.ok) {
+      return res.status(404).json({ error: result.message });
+    }
+
+    // Yangilangan keshni qaytaramiz
+    const fresh = await Hotel.findById(hotel._id).select('tripAdvisor').lean();
+    res.json({
+      ...result,
+      added: result.addedReviews,
+      tripAdvisor: fresh?.tripAdvisor || null,
+    });
+  } catch (err) {
+    if (err.response?.status === 401 || err.response?.status === 403) {
+      return res.status(502).json({
+        error: 'TripAdvisor 401/403 — kalit yoki IP whitelist (VPS IP) tekshiring',
+      });
+    }
+    next(err);
+  }
 }
 
 // Sharhdagi sana — ISO yoki "1 week ago"/"2 months ago" formatida. Aniqlab

@@ -26,6 +26,11 @@ const schema = z.object({
   TRIP_RAPIDAPI_KEY: z.string().optional(),
   XOTELO_RAPIDAPI_KEY: z.string().optional(),
   HASDATA_API_KEY: z.string().optional(),
+  // TripAdvisor rasmiy Content API — reyting, ranking, sharhlar (5 ta), rasmlar.
+  // https://www.tripadvisor.com/developers — kalit IP whitelist talab qiladi.
+  TRIPADVISOR_API_KEY: z.string().optional(),
+  // Content API kaliti referer bilan cheklangan bo'lsa, shu domen yuboriladi.
+  TRIPADVISOR_REFERER: z.string().optional(),
   // Yandex Maps Geosearch (Поиск по организациям) — mehmonxona org topish + URL.
   // https://yandex.com/maps-api/products/geosearch-api (JS API kalitidan alohida).
   YANDEX_GEOSEARCH_API_KEY: z.string().optional(),

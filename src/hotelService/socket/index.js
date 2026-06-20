@@ -35,6 +35,7 @@ const emit = {
   requestCompleted:   (hotelId, data) => toHotel(hotelId, "request_completed",     data),
   requestTimeout:     (hotelId, data) => toHotel(hotelId, "request_timeout",       data),
   newStaffRegistered: (hotelId, data) => toHotel(hotelId, "new_staff_registered",  data),
+  newReview:          (hotelId, data) => toHotel(hotelId, "new_review",            data),
 };
 
 module.exports = { init, getIO, emit };

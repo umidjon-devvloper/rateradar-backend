@@ -30,6 +30,21 @@ const hotelSchema = new mongoose.Schema(
     bookingComHotelId: { type: String, default: '' },
     expediaHotelId: { type: String, default: '' },
     tripAdvisorRapidId: { type: String, default: '' },
+    // TripAdvisor rasmiy Content API keshi (reyting, ranking, sharhlar soni,
+    // havola, rasmlar). locationId topilgach keshlanadi — qayta qidirilmaydi.
+    tripAdvisor: {
+      locationId: { type: String, default: '' },
+      rating: { type: Number, default: 0 },
+      reviewCount: { type: Number, default: 0 },
+      ranking: { type: String, default: '' },       // "#3 of 45 hotels in Bukhara"
+      rankingPosition: { type: Number, default: 0 },
+      priceLevel: { type: String, default: '' },     // $$ - $$$ belgi
+      url: { type: String, default: '' },            // web_url (attribution majburiy)
+      ratingImage: { type: String, default: '' },    // rating_image_url
+      photos: { type: [String], default: [] },       // 5 tagacha rasm URL
+      address: { type: String, default: '' },
+      updatedAt: { type: Date, default: null },
+    },
     // OTA property URL'lari — foydalanuvchi o'z mehmonxonasi URL'ini kiritadi
     otaUrls: {
       type: Object,

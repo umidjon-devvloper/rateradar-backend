@@ -3,6 +3,7 @@ const Hotel   = require("../models/Hotel");
 const Service = require("../models/Service");
 const Staff   = require("../models/Staff");
 const Request = require("../models/Request");
+const Review  = require("../models/Review");
 const { getBot }        = require("../bot");
 const { emit }          = require("../socket");
 const { translate }     = require("../services/translationService");
@@ -146,6 +147,47 @@ const createRequest = async (req, res) => {
   }
 };
 
+// POST /api/guest/reviews
+// Mehmon mehmonxona haqida sharh qoldiradi (yulduz + izoh)
+const createReview = async (req, res) => {
+  try {
+    const { hotel_id, room_number, rating, comment, guest_lang } = req.body;
+
+    const stars = parseInt(rating, 10);
+    if (!hotel_id || !stars || stars < 1 || stars > 5) {
+      return res.status(400).json({ message: "hotel_id va rating (1-5) majburiy" });
+    }
+
+    const hotel = await Hotel.findOne({ hotel_id });
+    if (!hotel) return res.status(404).json({ message: "Mehmonxona topilmadi" });
+
+    const lang = guest_lang || "en";
+    const hotelLang = hotel.language;
+
+    // Izohni mehmonxona tiliga tarjima qilamiz (panelda o'qishlari uchun)
+    const commentTranslated = comment
+      ? await translate(comment, lang, hotelLang)
+      : null;
+
+    const review = await Review.create({
+      hotel_id,
+      room_number: room_number ? room_number.toString().trim() : null,
+      rating: stars,
+      comment: comment || null,
+      comment_translated: commentTranslated,
+      guest_lang: lang,
+    });
+
+    // Admin panelga jonli xabar
+    emit.newReview(hotel_id, { review: review.toObject() });
+
+    res.status(201).json({ message: "Sharh yuborildi" });
+  } catch (err) {
+    console.error("createReview:", err.message);
+    res.status(500).json({ message: "Server xatosi" });
+  }
+};
+
 // Xodimlarga bot orqali xabar yuborish
 const sendToStaff = async (request, service, hotel) => {
   try {
@@ -191,4 +233,4 @@ const sendToStaff = async (request, service, hotel) => {
   }
 };
 
-module.exports = { getHotelInfo, getTranslatedServices, createRequest };
+module.exports = { getHotelInfo, getTranslatedServices, createRequest, createReview };

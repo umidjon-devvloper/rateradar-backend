@@ -5,6 +5,7 @@ const Hotel     = require("../models/Hotel");
 const Staff     = require("../models/Staff");
 const Service   = require("../models/Service");
 const Request   = require("../models/Request");
+const Review    = require("../models/Review");
 const { getBot }  = require("../bot");
 const { getMsg }  = require("../bot/messages");
 
@@ -350,9 +351,39 @@ const getReports = async (req, res) => {
   }
 };
 
+// ─── REVIEWS (mehmon sharhlari) ─────────────────────────────────────────────────
+
+const getReviews = async (req, res) => {
+  try {
+    const { page = 1, limit = 30 } = req.query;
+    const filter = { hotel_id: req.hotelId };
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [reviews, total, agg] = await Promise.all([
+      Review.find(filter).sort({ created_at: -1 }).skip(skip).limit(parseInt(limit)).lean(),
+      Review.countDocuments(filter),
+      Review.aggregate([
+        { $match: filter },
+        { $group: { _id: null, avg: { $avg: "$rating" }, count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    res.json({
+      data: reviews,
+      total,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      avg_rating: agg[0]?.avg ? Math.round(agg[0].avg * 10) / 10 : 0,
+    });
+  } catch (err) {
+    console.error("getReviews:", err.message);
+    res.status(500).json({ message: "Server xatosi" });
+  }
+};
+
 module.exports = {
   verifySSO, getMe, updateSettings, updateBranding,
   getActiveStaff, updateStaff, deleteStaff,
   getServices, createService, updateService, deleteService, regenerateServiceInvite,
-  getRequests, getReports,
+  getRequests, getReports, getReviews,
 };

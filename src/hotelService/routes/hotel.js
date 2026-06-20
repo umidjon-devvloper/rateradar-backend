@@ -4,7 +4,7 @@ const {
   verifySSO, getMe, updateSettings, updateBranding,
   getActiveStaff, updateStaff, deleteStaff,
   getServices, createService, updateService, deleteService, regenerateServiceInvite,
-  getRequests, getReports,
+  getRequests, getReports, getReviews,
 } = require("../controllers/hotelController");
 
 // Auth
@@ -28,8 +28,9 @@ router.put("/services/:id",                     updateService);
 router.delete("/services/:id",                  deleteService);
 router.post("/services/:id/regenerate-invite",  regenerateServiceInvite);
 
-// Requests + Reports
+// Requests + Reports + Reviews
 router.get("/requests", getRequests);
 router.get("/reports",  getReports);
+router.get("/reviews",  getReviews);
 
 module.exports = router;

@@ -12,6 +12,7 @@ import {
   findYandexUrl,
 } from './apify.service.js';
 import { hasYandex, findYandexOrg } from './yandex.service.js';
+import { hasTripAdvisorContent, syncTripAdvisor } from './tripadvisorContent.service.js';
 import { REVIEW_WINDOW_DAYS, purgeOldReviews } from '../controllers/review.controller.js';
 
 function ratingToSentiment(rating) {
@@ -154,6 +155,17 @@ async function fetchApifyForHotel(hotel) {
   return { added: adds.reduce((a, b) => a + b, 0) };
 }
 
+// TripAdvisor (rasmiy Content API) — reyting/ranking keshi + 5 sharh
+async function fetchTripAdvisorForHotel(hotel) {
+  if (!hasTripAdvisorContent()) return { added: 0 };
+  await purgeOldReviews(hotel._id, 'TripAdvisor');
+  const r = await syncTripAdvisor(hotel, { windowDays: REVIEW_WINDOW_DAYS }).catch((err) => {
+    console.warn(`[cron] TripAdvisor "${hotel.name}":`, err.message);
+    return { ok: false, addedReviews: 0 };
+  });
+  return { added: r.addedReviews || 0 };
+}
+
 // Yandex (Geosearch URL topish + Apify sharhlar) — gibrid
 async function fetchYandexForHotel(hotel) {
   if (!hasApify()) return { added: 0 };
@@ -192,15 +204,16 @@ async function fetchYandexForHotel(hotel) {
 async function runReviewMonitor() {
   console.log('[cron] Sharh yangilash boshlandi (7 kunlik oyna)...');
   try {
-    const hotels = await Hotel.find({ isActive: true }).select('_id name city countryCode otaUrls serpPropertyToken location').lean();
+    const hotels = await Hotel.find({ isActive: true }).select('_id name city countryCode otaUrls serpPropertyToken location tripAdvisor').lean();
     for (const hotel of hotels) {
       try {
-        const [g, a, y] = await Promise.all([
+        const [g, a, y, ta] = await Promise.all([
           fetchGoogleForHotel(hotel).catch((err) => { console.warn(`[cron] Google reviews "${hotel.name}":`, err.message); return 0; }),
           fetchApifyForHotel(hotel).catch((err) => { console.warn(`[cron] Apify reviews "${hotel.name}":`, err.message); return { added: 0 }; }),
           fetchYandexForHotel(hotel).catch((err) => { console.warn(`[cron] Yandex reviews "${hotel.name}":`, err.message); return { added: 0 }; }),
+          fetchTripAdvisorForHotel(hotel).catch((err) => { console.warn(`[cron] TripAdvisor "${hotel.name}":`, err.message); return { added: 0 }; }),
         ]);
-        console.log(`[cron] ${hotel.name}: Google +${g}, Apify +${a.added}, Yandex +${y.added}`);
+        console.log(`[cron] ${hotel.name}: Google +${g}, Apify +${a.added}, Yandex +${y.added}, TripAdvisor +${ta.added}`);
       } catch (err) {
         console.error(`[cron] Hotel "${hotel.name}" sharh xatosi:`, err.message);
       }
