@@ -28,6 +28,7 @@ const hotelSchema = new mongoose.Schema({
   // Mehmon webapp sahifasi dizayni (admin o'zgartiradi)
   branding: {
     theme:        { type: String, default: "blue" },     // tayyor mavzu kaliti
+    template:     { type: String, default: "" },          // tayyor shablon kaliti (bezak)
     primary_color:{ type: String, default: "#2563eb" },  // asosiy rang (hex)
     logo_url:     { type: String, default: "" },          // logo rasm havolasi
     welcome_text: { type: String, default: "" },          // salomlashuv matni

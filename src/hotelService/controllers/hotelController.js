@@ -92,9 +92,10 @@ const getMe = async (req, res) => {
 
 const updateBranding = async (req, res) => {
   try {
-    const { theme, primary_color, logo_url, welcome_text, bg_style } = req.body;
+    const { theme, template, primary_color, logo_url, welcome_text, bg_style } = req.body;
     const set = {};
     if (theme !== undefined) set["branding.theme"] = theme;
+    if (template !== undefined) set["branding.template"] = template;
     if (primary_color !== undefined) set["branding.primary_color"] = primary_color;
     if (logo_url !== undefined) set["branding.logo_url"] = logo_url;
     if (welcome_text !== undefined) set["branding.welcome_text"] = welcome_text;
