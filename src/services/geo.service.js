@@ -87,6 +87,31 @@ export async function geocode(address) {
   const key = `geo:${address.toLowerCase()}`;
   const c = cached(key);
   if (c) return c;
+
+  // 1) Google Geocoding (kalit bo'lsa, eng aniq). Kredit tugasa/xato bersa
+  //    pastdagi Nominatim'ga avtomatik o'tadi.
+  if (env.GOOGLE_PLACES_API_KEY) {
+    try {
+      const r = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
+        params: { address, key: env.GOOGLE_PLACES_API_KEY },
+        timeout: 8000,
+      });
+      const g = r.data?.results?.[0];
+      if (g?.geometry?.location) {
+        const result = {
+          lat: g.geometry.location.lat,
+          lng: g.geometry.location.lng,
+          displayName: g.formatted_address,
+        };
+        setCache(key, result);
+        return result;
+      }
+    } catch (err) {
+      console.warn('Google geocode xato (Nominatim\'ga o\'tildi):', err.message);
+    }
+  }
+
+  // 2) Nominatim (OSM) — bepul fallback
   try {
     const r = await axios.get('https://nominatim.openstreetmap.org/search', {
       params: { q: address, format: 'json', limit: 1 },

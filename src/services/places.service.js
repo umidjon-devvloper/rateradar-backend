@@ -43,8 +43,15 @@ export async function listCityHotels(cityContext = {}) {
   const cached = cityHotelsCache.get(key);
   if (cached && Date.now() - cached.at < CITY_HOTELS_TTL) return cached.hotels;
 
-  // Ikkala manbani parallel — biri xato bersa ham ikkinchisi qoladi.
-  const [overpass, serp] = await Promise.all([
+  // 3 manba parallel:
+  //   • Google Places — eng sifatli (kalit bo'lsa). Kredit tugasa/xato bersa
+  //     bu bo'sh qaytadi va bepul manbalar ishlayveradi (avtomatik fallback).
+  //   • Overpass (OSM) + SERP — bepul, doim ishlaydi.
+  const [google, overpass, serp] = await Promise.all([
+    googlePlacesCityHotels(cityContext).catch((e) => {
+      console.warn('Google Places city xato (bepulga o\'tildi):', describeAxiosError(e));
+      return [];
+    }),
     overpassAllCityHotels(cityContext).catch((e) => {
       console.warn('Overpass city hotels xato:', describeAxiosError(e));
       return [];
@@ -52,12 +59,74 @@ export async function listCityHotels(cityContext = {}) {
     serpMapsHotelSearch('', '', cityContext).catch(() => []),
   ]);
 
-  const merged = dedupeHotels([...overpass, ...serp])
-    .filter((h) => h.name && Number.isFinite(h.lat) && Number.isFinite(h.lng))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  // Tartib: Google birinchi (dedupe sifatlisini saqlaydi) → SERP → Overpass.
+  // Axlat nomlar (1-2 belgi, takror) olib tashlanadi. Mashhurlar (sharhi ko'p) tepada.
+  const merged = dedupeHotels([...google, ...serp, ...overpass])
+    .filter(
+      (h) => h.name && !isJunkName(h.name) && Number.isFinite(h.lat) && Number.isFinite(h.lng),
+    )
+    .sort((a, b) => (b.reviews || 0) - (a.reviews || 0) || a.name.localeCompare(b.name));
 
   cityHotelsCache.set(key, { at: Date.now(), hotels: merged });
   return merged;
+}
+
+// Google Places — shahardagi hotellar (searchText, 3 sahifagacha ~60 ta sifatli).
+async function googlePlacesCityHotels(cityContext) {
+  if (!env.GOOGLE_PLACES_API_KEY) return [];
+  const hasCoords = Number.isFinite(cityContext.lat) && Number.isFinite(cityContext.lng);
+  const all = [];
+  let pageToken;
+
+  for (let page = 0; page < 3; page++) {
+    const body = {
+      textQuery: `hotels in ${cityContext.city || ''}`.trim(),
+      includedType: 'lodging',
+      pageSize: 20,
+      ...(hasCoords && {
+        locationBias: {
+          circle: {
+            center: { latitude: cityContext.lat, longitude: cityContext.lng },
+            radius: CITY_SEARCH_RADIUS_KM * 1000,
+          },
+        },
+      }),
+      ...(pageToken && { pageToken }),
+    };
+    const r = await axios.post('https://places.googleapis.com/v1/places:searchText', body, {
+      headers: {
+        'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
+        'X-Goog-FieldMask':
+          'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,nextPageToken',
+      },
+      timeout: 12000,
+    });
+    for (const p of r.data?.places || []) {
+      all.push({
+        placeId: p.id,
+        osmId: '',
+        name: p.displayName?.text,
+        address: p.formattedAddress,
+        lat: p.location?.latitude,
+        lng: p.location?.longitude,
+        rating: p.rating || 0,
+        reviews: p.userRatingCount || 0,
+        source: 'google_places',
+      });
+    }
+    pageToken = r.data?.nextPageToken;
+    if (!pageToken) break;
+  }
+  return all.filter((h) => h.name);
+}
+
+// Axlat/bema'ni nomlarni aniqlaydi (OSM'da uchraydi: "Аа", "ааа", 1-2 belgi).
+function isJunkName(name) {
+  const n = String(name).trim();
+  if (n.length < 3) return true;
+  const uniqChars = new Set(n.toLowerCase().replace(/\s/g, '')).size;
+  if (uniqChars <= 1) return true; // bir xil belgidan iborat
+  return false;
 }
 
 async function overpassAllCityHotels(cityContext) {
