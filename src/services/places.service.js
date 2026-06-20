@@ -31,6 +31,99 @@ export async function searchHotels(query, countryCode = '', cityContext = {}) {
   return await osmNearbyNameSearch(query, cityContext);
 }
 
+// ─── Shahar bo'yicha BARCHA hotellar (onboarding ro'yxati) ───────────
+// Overpass (OSM, to'liq) + SERP (Google Maps) birlashtirilib, dedupe qilinadi.
+// Shahar bo'yicha 1 soat keshlanadi — har harfda emas, bir marta yuklanadi.
+const cityHotelsCache = new Map(); // "lat,lng" → { at, hotels }
+const CITY_HOTELS_TTL = 60 * 60 * 1000;
+
+export async function listCityHotels(cityContext = {}) {
+  if (!Number.isFinite(cityContext.lat) || !Number.isFinite(cityContext.lng)) return [];
+  const key = `${cityContext.lat.toFixed(2)},${cityContext.lng.toFixed(2)}`;
+  const cached = cityHotelsCache.get(key);
+  if (cached && Date.now() - cached.at < CITY_HOTELS_TTL) return cached.hotels;
+
+  // Ikkala manbani parallel — biri xato bersa ham ikkinchisi qoladi.
+  const [overpass, serp] = await Promise.all([
+    overpassAllCityHotels(cityContext).catch((e) => {
+      console.warn('Overpass city hotels xato:', describeAxiosError(e));
+      return [];
+    }),
+    serpMapsHotelSearch('', '', cityContext).catch(() => []),
+  ]);
+
+  const merged = dedupeHotels([...overpass, ...serp])
+    .filter((h) => h.name && Number.isFinite(h.lat) && Number.isFinite(h.lng))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  cityHotelsCache.set(key, { at: Date.now(), hotels: merged });
+  return merged;
+}
+
+async function overpassAllCityHotels(cityContext) {
+  const radius = CITY_SEARCH_RADIUS_KM * 1000;
+  const { lat, lng } = cityContext;
+  const q = `[out:json][timeout:25];(
+    node["tourism"~"^(hotel|hostel|guest_house|motel|apartment|resort|chalet)$"](around:${radius},${lat},${lng});
+    way["tourism"~"^(hotel|hostel|guest_house|motel|apartment|resort|chalet)$"](around:${radius},${lat},${lng});
+    node["building"="hotel"](around:${radius},${lat},${lng});
+    way["building"="hotel"](around:${radius},${lat},${lng});
+  );out center tags 300;`;
+
+  const r = await axios.post(
+    'https://overpass-api.de/api/interpreter',
+    `data=${encodeURIComponent(q)}`,
+    {
+      timeout: 25000,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+        'User-Agent': 'RateRadar/1.0 (hotel-monitoring)',
+      },
+    },
+  );
+
+  return (r.data?.elements || [])
+    .map((el) => {
+      const tags = el.tags || {};
+      const name =
+        tags.name || tags['name:en'] || tags['name:uz'] || tags['name:ru'] || '';
+      return {
+        placeId: '',
+        osmId: `${el.type}:${el.id}`,
+        name,
+        address:
+          [tags['addr:housenumber'], tags['addr:street'], tags['addr:city'] || cityContext.city]
+            .filter(Boolean)
+            .join(', ') || cityContext.city || '',
+        lat: el.lat ?? el.center?.lat,
+        lng: el.lon ?? el.center?.lon,
+        stars: parseInt(tags.stars) || 0,
+        rating: 0,
+        reviews: 0,
+        source: 'osm_overpass',
+      };
+    })
+    .filter((h) => h.name); // faqat nomi borlar
+}
+
+// Bir xil nomdagi (va boy ma'lumotli) yozuvlarni birlashtiradi.
+function dedupeHotels(list) {
+  const byName = new Map();
+  for (const h of list) {
+    const k = normalizeText(h.name);
+    if (!k) continue;
+    const existing = byName.get(k);
+    if (!existing) {
+      byName.set(k, h);
+    } else if ((h.reviews || 0) > (existing.reviews || 0)) {
+      // sharhi ko'proq manbani afzal ko'ramiz, lekin osmId'ni yo'qotmaymiz
+      byName.set(k, { ...existing, ...h, osmId: existing.osmId || h.osmId });
+    }
+  }
+  return [...byName.values()];
+}
+
 export async function searchNearby(coords, radiusKm = 2) {
   const [lng, lat] = coords;
   if (env.GOOGLE_PLACES_API_KEY) {

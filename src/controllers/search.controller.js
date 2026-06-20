@@ -1,5 +1,8 @@
 import { getCountries, searchCities, geocode } from '../services/geo.service.js';
-import { searchHotels } from '../services/places.service.js';
+import { searchHotels, listCityHotels } from '../services/places.service.js';
+
+const normalize = (v) =>
+  String(v).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
 export async function listCountries(req, res, next) {
   try {
@@ -21,12 +24,22 @@ export async function findHotels(req, res, next) {
   try {
     const { q = '', country = '', city = '', lat, lng } = req.query;
     res.set('Cache-Control', 'no-store');
+    const cLat = lat ? parseFloat(lat) : undefined;
+    const cLng = lng ? parseFloat(lng) : undefined;
+    const cityContext = { city, lat: cLat, lng: cLng };
+
+    // Shahar koordinatasi bor — o'sha shahardagi BARCHA hotelni qaytaramiz
+    // (keshli, to'liq ro'yxat). q berilsa, server tomonda nom bo'yicha filtrlaymiz.
+    if (Number.isFinite(cLat) && Number.isFinite(cLng)) {
+      let hotels = await listCityHotels(cityContext);
+      const qn = normalize(q || '');
+      if (qn) hotels = hotels.filter((h) => normalize(h.name).includes(qn));
+      return res.json({ hotels, count: hotels.length });
+    }
+
+    // Koordinatasiz — eski nom bo'yicha qidiruv (fallback)
     if (!q || q.length < 2) return res.json({ hotels: [] });
-    const hotels = await searchHotels(q, country, {
-      city,
-      lat: lat ? parseFloat(lat) : undefined,
-      lng: lng ? parseFloat(lng) : undefined,
-    });
+    const hotels = await searchHotels(q, country, cityContext);
     res.json({ hotels, count: hotels.length });
   } catch (err) { next(err); }
 }
