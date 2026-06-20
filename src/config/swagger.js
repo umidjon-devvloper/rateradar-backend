@@ -17,7 +17,7 @@ const options = {
   definition: {
     openapi: "3.0.3",
     info: {
-      title: "RateRadar API",
+      title: "TheHotelSaaS API",
       version: "0.1.0",
       description:
         "Hotel narx monitoring platformasi — multi-provider narx rotatori, " +

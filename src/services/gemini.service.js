@@ -126,10 +126,10 @@ function getTextModel() {
   return textModel;
 }
 
-const SYSTEM_PROMPT = `Siz RateRadar platformasining rasmiy yordamchi assistentisiz.
+const SYSTEM_PROMPT = `Siz TheHotelSaaS platformasining rasmiy yordamchi assistentisiz.
 
-RateRadar haqida:
-RateRadar — mehmonxona egalari uchun AI-ga asoslangan raqobat tahlili va narx boshqaruvi platformasi.
+TheHotelSaaS haqida:
+TheHotelSaaS — mehmonxona egalari uchun AI-ga asoslangan raqobat tahlili va narx boshqaruvi platformasi.
 
 Asosiy imkoniyatlar:
 • Raqobatchilar narxlari — yaqin-atrofdagi mehmonxonalar narxlarini real vaqtda kuzatish
@@ -150,7 +150,7 @@ Support bilan bog'lanish:
 • Email: support@rateradar.uz
 
 Qoidalar:
-- Faqat RateRadar va mehmonxona boshqaruvi haqida javob bering
+- Faqat TheHotelSaaS va mehmonxona boshqaruvi haqida javob bering
 - Javoblarni qisqa va aniq yozing (3-5 jumla maksimum)
 - Foydalanuvchi tilida javob bering (o'zbek, rus yoki ingliz)
 - Texnik muammo bo'lsa Telegram yoki email orqali murojaat qilishni tavsiya eting`;
@@ -160,7 +160,7 @@ export async function chatSupport(messages) {
 
   const history = [
     { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
-    { role: 'model', parts: [{ text: 'Tushunarli. Men RateRadar yordamchi assistentiman. Savollaringizga javob berishga tayyorman.' }] },
+    { role: 'model', parts: [{ text: 'Tushunarli. Men TheHotelSaaS yordamchi assistentiman. Savollaringizga javob berishga tayyorman.' }] },
     ...messages.slice(0, -1).map((msg) => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: msg.content }],

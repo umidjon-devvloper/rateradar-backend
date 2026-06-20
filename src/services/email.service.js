@@ -18,7 +18,7 @@ export async function sendMail({ to, subject, html }) {
     return false;
   }
   await transport.sendMail({
-    from: env.SMTP_FROM || `RateRadar <${env.SMTP_USER}>`,
+    from: env.SMTP_FROM || `TheHotelSaaS <${env.SMTP_USER}>`,
     to,
     subject,
     html,
@@ -51,7 +51,7 @@ export async function sendCompetitorPriceAlert({ userEmail, hotelName, yourPrice
 <head><meta charset="utf-8"></head>
 <body style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
   <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:12px;margin-bottom:24px">
-    <h1 style="color:#fff;margin:0;font-size:20px">📈 RateRadar</h1>
+    <h1 style="color:#fff;margin:0;font-size:20px">📈 TheHotelSaaS</h1>
     <p style="color:#c7d2fe;margin:4px 0 0">Raqib narxi sizning narxingizdan oshib ketdi</p>
   </div>
 
@@ -74,7 +74,7 @@ export async function sendCompetitorPriceAlert({ userEmail, hotelName, yourPrice
   </table>
 
   <p style="margin-top:24px;font-size:12px;color:#9ca3af">
-    Ushbu xabar RateRadar tomonidan avtomatik yuborildi.<br>
+    Ushbu xabar TheHotelSaaS tomonidan avtomatik yuborildi.<br>
     Monitoring har 6 soatda tekshiriladi.
   </p>
 </body>
@@ -82,7 +82,7 @@ export async function sendCompetitorPriceAlert({ userEmail, hotelName, yourPrice
 
   await sendMail({
     to: userEmail,
-    subject: `RateRadar: ${changes.length} ta raqib narxi sizdan oshdi — ${hotelName}`,
+    subject: `TheHotelSaaS: ${changes.length} ta raqib narxi sizdan oshdi — ${hotelName}`,
     html,
   });
 }
@@ -96,7 +96,7 @@ export async function sendBroadcastEmail({ to, subject, title, body }) {
 <head><meta charset="utf-8"></head>
 <body style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
   <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:12px;margin-bottom:24px">
-    <h1 style="color:#fff;margin:0;font-size:20px">🔔 RateRadar</h1>
+    <h1 style="color:#fff;margin:0;font-size:20px">🔔 TheHotelSaaS</h1>
     <p style="color:#c7d2fe;margin:4px 0 0">Yangilik / e'lon</p>
   </div>
 
@@ -104,7 +104,7 @@ export async function sendBroadcastEmail({ to, subject, title, body }) {
   <div style="color:#374151;font-size:14px;line-height:1.6">${safeBody}</div>
 
   <p style="margin-top:24px;font-size:12px;color:#9ca3af">
-    Ushbu xabar RateRadar jamoasi tomonidan yuborildi.
+    Ushbu xabar TheHotelSaaS jamoasi tomonidan yuborildi.
   </p>
 </body>
 </html>`;

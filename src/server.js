@@ -3,6 +3,7 @@ import { createRequire } from 'module';
 import app from './app.js';
 import { env } from './config/env.js';
 import { connectDB } from './config/db.js';
+import { initSecurity } from './services/security.service.js';
 import { startCompetitorMonitor } from './services/competitorMonitor.service.js';
 import { startReviewMonitor } from './services/reviewMonitor.service.js';
 import { startXoteloMonitor } from './services/xoteloMonitor.service.js';
@@ -13,6 +14,7 @@ const { initRealtime: initHotelService } = require('./hotelService/mount.js');
 
 async function start() {
   await connectDB();
+  await initSecurity(); // bloklangan IP'larni yuklash + davriy tozalash
 
   const httpServer = http.createServer(app);
   const io = initSocket(httpServer);

@@ -1,6 +1,7 @@
 import User from "../models/User.js";
 import { signToken } from "../middleware/auth.js";
 import { z } from "zod";
+import * as sec from "../services/security.service.js";
 
 const registerSchema = z.object({
   name: z.string().min(2),
@@ -42,16 +43,28 @@ export async function register(req, res, next) {
 export async function login(req, res, next) {
   try {
     const { email, password } = loginSchema.parse(req.body);
+    const ip = req.clientIp || req.ip;
     const user = await User.findOne({ email }).select("+password");
-    if (!user || !user.isActive)
+    const ok = user && user.isActive && (await user.comparePassword(password));
+    if (!ok) {
+      // Brute-force kuzatuvi: ketma-ket noto'g'ri urinishlarni hisoblaymiz.
+      const fails = sec.recordFailedLogin(ip);
+      sec.recordEvent({
+        type: "failed_login", ip, severity: "low",
+        method: req.method, path: req.originalUrl,
+        userAgent: req.headers["user-agent"], detail: email,
+      });
+      if (fails >= sec.loginCfg.maxFails) {
+        await sec.banIp(ip, {
+          reason: `Login brute-force (${fails} urinish)`,
+          minutes: sec.loginCfg.banMinutes,
+        });
+      }
       return res
         .status(401)
         .json({ error: "Email yoki parol noto\x27g\x27ri" });
-    const ok = await user.comparePassword(password);
-    if (!ok)
-      return res
-        .status(401)
-        .json({ error: "Email yoki parol noto\x27g\x27ri" });
+    }
+    sec.clearFailedLogin(ip); // muvaffaqiyatli login — hisoblagichni tozalaymiz
     user.lastLoginAt = new Date();
     await user.save();
     const token = signToken(user._id);

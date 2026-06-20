@@ -110,10 +110,9 @@ export async function createInvoice(req, res, next) {
       items: [
         {
           items_id: '1',
-          name: `RateRadar ${planCfg.name}`,
+          name: `TheHotelSaaS ${planCfg.name}`,
           amount,
           quantity: 1,
-          details: [{ name: 'package_code', values: '-' }],
         },
       ],
     });

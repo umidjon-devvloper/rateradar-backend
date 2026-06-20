@@ -35,6 +35,6 @@ export function docsAuth(req, res, next) {
   }
 
   // Brauzer login oynasini chiqarishi uchun WWW-Authenticate header shart.
-  res.set("WWW-Authenticate", 'Basic realm="RateRadar API Docs", charset="UTF-8"');
+  res.set("WWW-Authenticate", 'Basic realm="TheHotelSaaS API Docs", charset="UTF-8"');
   return res.status(401).json({ error: "Hujjatlarga kirish uchun login/parol kerak" });
 }

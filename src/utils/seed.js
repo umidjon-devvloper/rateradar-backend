@@ -16,7 +16,7 @@ async function seed() {
   } else {
     await User.create({
       email: env.ADMIN_EMAIL, password: env.ADMIN_PASSWORD,
-      name: 'RateRadar Admin', role: 'admin', lang: 'uz',
+      name: 'TheHotelSaaS Admin', role: 'admin', lang: 'uz',
       onboardingCompleted: true,
     });
     console.log(`✓ Admin yaratildi: ${env.ADMIN_EMAIL}`);
