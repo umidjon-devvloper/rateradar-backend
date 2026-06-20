@@ -22,11 +22,20 @@ export async function findCities(req, res, next) {
 
 export async function findHotels(req, res, next) {
   try {
-    const { q = '', country = '', city = '', lat, lng } = req.query;
+    const { q = '', country = '', city = '', lat, lng, direct } = req.query;
     res.set('Cache-Control', 'no-store');
     const cLat = lat ? parseFloat(lat) : undefined;
     const cLng = lng ? parseFloat(lng) : undefined;
     const cityContext = { city, lat: cLat, lng: cLng };
+    const isDirect = direct === '1' || direct === 'true';
+
+    // direct=1 → TO'G'RIDAN-TO'G'RI jonli qidiruv (Google Places searchText → SERP → OSM).
+    // Keshlangan shahar ro'yxatida yo'q hotelni ham topadi.
+    if (isDirect) {
+      if (!q || q.trim().length < 2) return res.json({ hotels: [] });
+      const hotels = await searchHotels(q, country, cityContext);
+      return res.json({ hotels, count: hotels.length });
+    }
 
     // Shahar koordinatasi bor — o'sha shahardagi BARCHA hotelni qaytaramiz
     // (keshli, to'liq ro'yxat). q berilsa, server tomonda nom bo'yicha filtrlaymiz.
