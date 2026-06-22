@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Hotel from "../models/Hotel.js";
 import Competitor from "../models/Competitor.js";
 import Review from "../models/Review.js";
@@ -50,6 +51,18 @@ export async function aiPriceRecommendations(req, res, next) {
       ? Math.round(prices.reduce((a, b) => a + b, 0) / prices.length)
       : 0;
 
+    // Mehmonxona-xizmati moduliga ulanganmi? — hs_hotels kolleksiyasida
+    // hotel_id = RateRadar hotel _id (SSO birinchi kirishda yaratiladi).
+    let hotelServiceConnected = false;
+    try {
+      const hs = await mongoose.connection.db
+        .collection("hs_hotels")
+        .findOne({ hotel_id: hotel._id.toString() }, { projection: { _id: 1 } });
+      hotelServiceConnected = !!hs;
+    } catch {
+      /* kolleksiya yo'q bo'lsa — ulanmagan deb hisoblaymiz */
+    }
+
     const lang = req.query.lang || "uz";
 
     const result = await getPriceRecommendations({
@@ -57,6 +70,10 @@ export async function aiPriceRecommendations(req, res, next) {
       myPrice: hotel.currentPrice || 0,
       competitors: compData,
       marketAvg,
+      rating: hotel.rating || 0,
+      reviewCount: hotel.reviewCount || 0,
+      stars: hotel.stars || 0,
+      hotelServiceConnected,
       lang,
     });
 

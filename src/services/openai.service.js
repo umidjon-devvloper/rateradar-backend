@@ -54,19 +54,39 @@ Sharh: "${reviewText.slice(0, 1500)}"`;
   }
 }
 
-export async function getPriceRecommendations({ myHotel, myPrice, competitors, marketAvg, lang = 'uz' }) {
+export async function getPriceRecommendations({
+  myHotel,
+  myPrice,
+  competitors,
+  marketAvg,
+  rating = 0,
+  reviewCount = 0,
+  stars = 0,
+  hotelServiceConnected = false,
+  lang = 'uz',
+}) {
   const langName = lang === 'uz' ? "o'zbek" : lang === 'ru' ? 'rus' : 'ingliz';
   const compList = competitors.length
     ? competitors.map((c, i) => `${i + 1}. ${c.name} — $${c.price} (${c.stars}★, ${c.distanceKm}km)`).join('\n')
     : 'Ma\'lumot yo\'q';
 
-  const prompt = `Sen hotel revenue manager mutaxassisisan. Ma'lumotga qarab 3 ta amaliy tavsiya ber.
+  const prompt = `Sen hotel revenue manager va mehmonxona biznesi maslahatchisisan. Ma'lumotga qarab 3-5 ta amaliy tavsiya ber.
 
 Mening hotel: ${myHotel}
 Mening narx: $${myPrice}
 Bozor o'rtacha: $${marketAvg}
+Yulduz: ${stars}★ | Reyting: ${rating} (${reviewCount} sharh)
 Raqiblar:
 ${compList}
+
+Mehmonxona-xizmati moduli (RateRadar Hotel Service — mehmonlar QR orqali xizmat buyuradi, so'rovlar xodimlarga Telegram'da boradi) holati: ${hotelServiceConnected ? 'ULANGAN' : 'ULANMAGAN'}
+
+Tavsiyalar quyidagilarni qamrab olsin:
+- Narx optimizatsiyasi (raqiblar va bozorga nisbatan) — currentPrice/suggestedPrice bilan.
+- Qo'shimcha daromad: qo'shimcha xizmatlar/upsell (transfer, nonushta, kech chiqish, ekskursiya va h.k.) — reyting va bozorga mos.
+${hotelServiceConnected
+  ? '- Mehmonxona-xizmati ULANGAN: undan qanday yaxshiroq foydalanishni tavsiya qil.'
+  : '- Mehmonxona-xizmati ULANMAGAN bo\'lgani uchun ALBATTA bitta tavsiya mehmonxona-xizmati modulini ulashga oid bo\'lsin (mehmon tajribasi va daromadni oshiradi). O\'sha tavsiyaning "action" maydonini "connect_hotel_service" qilib belgila.'}
 
 Faqat JSON qaytar (${langName} tilida):
 {
@@ -75,13 +95,14 @@ Faqat JSON qaytar (${langName} tilida):
       "priority": 1,
       "title": "Qisqa amal sarlavhasi",
       "description": "Batafsil sabab va tushuntirish",
-      "platform": "Booking.com yoki Agoda yoki Hammasi",
+      "platform": "Booking.com yoki Agoda yoki Hammasi yoki Xizmatlar",
+      "action": "price | upsell | connect_hotel_service | other",
       "currentPrice": 0,
       "suggestedPrice": 0,
       "expectedImpact": "Kutilgan effekt"
     }
   ],
-  "summary": "Umumiy bozor pozitsiyasi haqida 1-2 jumla"
+  "summary": "Umumiy bozor pozitsiyasi va imkoniyatlar haqida 1-2 jumla"
 }`;
 
   try {
