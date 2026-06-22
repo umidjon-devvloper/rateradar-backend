@@ -18,7 +18,7 @@ export const PLANS = {
   starter: {
     id: 'starter',
     name: 'Starter',
-    priceUzs: 5, // TEST: vaqtincha 5 so'm (ATMOS sinovi uchun). ASLI: 99_000
+    priceUzs: 1_000, // TEST: vaqtincha 1000 so'm (ATMOS sinovi uchun). ASLI: 99_000
     durationDays: 30,
     purchasable: true,
   },
