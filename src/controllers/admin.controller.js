@@ -1,4 +1,5 @@
 import User from "../models/User.js";
+import Payment from "../models/Payment.js";
 import Hotel from "../models/Hotel.js";
 import Competitor from "../models/Competitor.js";
 import PriceSnapshot from "../models/PriceSnapshot.js";
@@ -232,6 +233,70 @@ export async function recentActivity(req, res, next) {
     const limit = parseInt(req.query.limit) || 20;
     const recent = await User.find().sort({ createdAt: -1 }).limit(limit);
     res.json({ recent });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// Barcha to'lov tranzaksiyalari — filtr (status/plan/channel/qidiruv) + sahifalash.
+// Summalar TIYINDA saqlanadi (1 so'm = 100 tiyin) — UI so'mga aylantiradi.
+export async function listTransactions(req, res, next) {
+  try {
+    const { page = 1, limit = 50, status = "", plan = "", channel = "", search = "" } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const filter = {};
+    if (status) filter.status = status;
+    if (plan) filter.plan = plan;
+    if (channel) filter.channel = channel;
+
+    // Qidiruv: foydalanuvchi email/ism, yoki account / cardPan bo'yicha.
+    if (search) {
+      const rx = new RegExp(search.trim(), "i");
+      const matchedUsers = await User.find({ $or: [{ email: rx }, { name: rx }] })
+        .select("_id")
+        .lean();
+      filter.$or = [
+        { account: rx },
+        { cardPan: rx },
+        { user: { $in: matchedUsers.map((u) => u._id) } },
+      ];
+    }
+
+    const [items, total, summary] = await Promise.all([
+      Payment.find(filter)
+        .populate("user", "name email plan countryCode")
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Payment.countDocuments(filter),
+      // Umumiy ko'rsatkichlar (filtrdan mustaqil): tushum va status taqsimoti.
+      Payment.aggregate([
+        {
+          $group: {
+            _id: "$status",
+            count: { $sum: 1 },
+            amount: { $sum: "$amount" },
+          },
+        },
+      ]),
+    ]);
+
+    const byStatus = {};
+    let paidRevenue = 0;
+    for (const s of summary) {
+      byStatus[s._id] = { count: s.count, amount: s.amount };
+      if (s._id === "paid") paidRevenue = s.amount;
+    }
+
+    res.json({
+      transactions: items,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / limit),
+      summary: { byStatus, paidRevenue }, // amount tiyinda
+    });
   } catch (err) {
     next(err);
   }

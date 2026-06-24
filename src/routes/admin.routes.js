@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   getDashboard, listUsers, getUserDetail, toggleUserActive,
-  getApiStats, recentActivity, activeUsers, sendBroadcast,
+  getApiStats, recentActivity, activeUsers, sendBroadcast, listTransactions,
 } from '../controllers/admin.controller.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
@@ -103,6 +103,31 @@ router.patch('/users/:id/toggle', toggleUserActive);
  *       403: { $ref: '#/components/responses/Forbidden' }
  */
 router.get('/api-stats', getApiStats);
+
+/**
+ * @openapi
+ * /admin/transactions:
+ *   get:
+ *     tags: [Admin]
+ *     summary: Barcha to'lov tranzaksiyalari (filtr + sahifalash)
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: [created, otp_sent, paid, failed, reversed] }
+ *       - in: query
+ *         name: plan
+ *         schema: { type: string, enum: [starter, pro] }
+ *       - in: query
+ *         name: channel
+ *         schema: { type: string, enum: [card, invoice] }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Tranzaksiyalar ro'yxati }
+ *       403: { $ref: '#/components/responses/Forbidden' }
+ */
+router.get('/transactions', listTransactions);
 
 /**
  * @openapi
