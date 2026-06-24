@@ -151,8 +151,14 @@ export async function preApply({ transactionId, cardNumber, expiry }) {
     transaction_id: Number(transactionId),
   };
   const data = await authPost('/merchant/pay/pre-apply', body);
-  ensureOk(data, 'pre-apply');
-  return { raw: data };
+  // ERR_OTP_BEEN_SENT (STPIMS-ERR-201) — SMS-OTP allaqachon shu tranzaksiya
+  // uchun yuborilgan (qayta bosish / takroriy so'rov). Bu xato emas: OTP
+  // kartaga ketgan, foydalanuvchi uni kiritsa bo'ladi. Shuning uchun o'tkazamiz.
+  const code = data?.result?.code;
+  if (code && code !== 'OK' && code !== 'STPIMS-ERR-201') {
+    ensureOk(data, 'pre-apply');
+  }
+  return { raw: data, otpAlreadySent: code === 'STPIMS-ERR-201' };
 }
 
 /**
