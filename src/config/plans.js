@@ -25,7 +25,7 @@ export const PLANS = {
   pro: {
     id: 'pro',
     name: 'Pro',
-    priceUzs: 199_000,
+    priceUzs: 1_000, // TEST: vaqtincha 1000 so'm (ATMOS sinovi uchun). ASLI: 199_000
     durationDays: 30,
     purchasable: true,
   },
