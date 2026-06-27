@@ -5,7 +5,7 @@ import { env } from './config/env.js';
 import { connectDB } from './config/db.js';
 import { initSecurity } from './services/security.service.js';
 import { startCompetitorMonitor } from './services/competitorMonitor.service.js';
-import { startReviewMonitor } from './services/reviewMonitor.service.js';
+import { startWeeklyRefresh } from './services/weeklyRefresh.service.js';
 import { startXoteloMonitor } from './services/xoteloMonitor.service.js';
 import { initSocket } from './services/socket.service.js';
 
@@ -33,7 +33,10 @@ async function start() {
     //   har 6 soatda ishlardi (~$0.18 har bir hotel). Foydalanuvchi
     //   so'roviga ko'ra olib tashlandi. Endi narxlar faqat foydalanuvchi
     //   "SerpAPI yangilash" tugmasini bosganda yangilanadi.
-    startReviewMonitor();
+    // Haftalik to'liq yangilanish (yakshanba 03:00): narx (o'z+raqib) + yangi
+    // sharhlar. Eski alohida sharh cron'i (dushanba) shu bilan birlashtirildi —
+    // sharh haftada bir marta olinadi (kam token).
+    startWeeklyRefresh();
     startXoteloMonitor(); // Har kuni 00:00 — ertaga+indin Xotelo narxlari
   });
 }

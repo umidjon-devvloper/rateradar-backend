@@ -201,19 +201,26 @@ async function fetchYandexForHotel(hotel) {
   return { added };
 }
 
+// Bitta hotel uchun barcha kanaldan sharh yig'adi (Google, Apify OTA'lar,
+// Yandex, TripAdvisor). Cron ham, onboarding orkestratori ham shuni chaqiradi.
+export async function collectReviewsForHotel(hotel) {
+  const [g, a, y, ta] = await Promise.all([
+    fetchGoogleForHotel(hotel).catch((err) => { console.warn(`[reviews] Google "${hotel.name}":`, err.message); return 0; }),
+    fetchApifyForHotel(hotel).catch((err) => { console.warn(`[reviews] Apify "${hotel.name}":`, err.message); return { added: 0 }; }),
+    fetchYandexForHotel(hotel).catch((err) => { console.warn(`[reviews] Yandex "${hotel.name}":`, err.message); return { added: 0 }; }),
+    fetchTripAdvisorForHotel(hotel).catch((err) => { console.warn(`[reviews] TripAdvisor "${hotel.name}":`, err.message); return { added: 0 }; }),
+  ]);
+  return { google: g, apify: a.added || 0, yandex: y.added || 0, tripadvisor: ta.added || 0 };
+}
+
 async function runReviewMonitor() {
   console.log('[cron] Sharh yangilash boshlandi (7 kunlik oyna)...');
   try {
     const hotels = await Hotel.find({ isActive: true }).select('_id name city countryCode otaUrls serpPropertyToken location tripAdvisor').lean();
     for (const hotel of hotels) {
       try {
-        const [g, a, y, ta] = await Promise.all([
-          fetchGoogleForHotel(hotel).catch((err) => { console.warn(`[cron] Google reviews "${hotel.name}":`, err.message); return 0; }),
-          fetchApifyForHotel(hotel).catch((err) => { console.warn(`[cron] Apify reviews "${hotel.name}":`, err.message); return { added: 0 }; }),
-          fetchYandexForHotel(hotel).catch((err) => { console.warn(`[cron] Yandex reviews "${hotel.name}":`, err.message); return { added: 0 }; }),
-          fetchTripAdvisorForHotel(hotel).catch((err) => { console.warn(`[cron] TripAdvisor "${hotel.name}":`, err.message); return { added: 0 }; }),
-        ]);
-        console.log(`[cron] ${hotel.name}: Google +${g}, Apify +${a.added}, Yandex +${y.added}, TripAdvisor +${ta.added}`);
+        const r = await collectReviewsForHotel(hotel);
+        console.log(`[cron] ${hotel.name}: Google +${r.google}, Apify +${r.apify}, Yandex +${r.yandex}, TripAdvisor +${r.tripadvisor}`);
       } catch (err) {
         console.error(`[cron] Hotel "${hotel.name}" sharh xatosi:`, err.message);
       }

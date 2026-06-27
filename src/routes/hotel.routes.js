@@ -5,7 +5,7 @@ import {
   enrichMyHotel, getOtaPrices, getOtaChannels, getOtaChannelDetail, setOtaChannelPrice,
   fetchOtaChannel, fetchAllOtaChannels, findBookingUrlEndpoint,
   getHotelXoteloRates, getMyCategoryRatings,
-  discoverNearbyHotels, instantSnapshot,
+  discoverNearbyHotels, instantSnapshot, getCollectStatus,
 } from '../controllers/hotel.controller.js';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveHotel } from '../middleware/resolveHotel.js';
@@ -87,6 +87,20 @@ router.post('/', createHotel);
  */
 router.get('/me', getMyHotel);
 router.put('/me', updateMyHotel);
+
+/**
+ * @openapi
+ * /hotels/me/collect-status:
+ *   get:
+ *     tags: [Hotels]
+ *     summary: Onboarding ma'lumot yig'ish holati (pending/collecting/ready/error)
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *     responses:
+ *       200: { description: Yig'ish holati va progressi }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.get('/me/collect-status', getCollectStatus);
 
 /**
  * @openapi

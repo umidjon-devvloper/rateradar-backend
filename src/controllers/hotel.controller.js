@@ -12,6 +12,7 @@ import {
   findBookingUrl, findExpediaUrl, findTripUrl,
 } from '../services/apify.service.js';
 import { TARGET_CHANNELS, fetchChannelFallback } from '../services/channelFallback.service.js';
+import { startCollect } from '../services/onboardingCollect.service.js';
 import { z } from 'zod';
 
 const createHotelSchema = z.object({
@@ -61,6 +62,8 @@ export async function createHotel(req, res, next) {
       country: data.country, countryCode: data.countryCode, city: data.city,
       googlePlaceId: data.googlePlaceId, osmId: data.osmId,
       stars: data.stars,
+      // Onboarding: ma'lumot yig'ish darrov boshlanadi — modal "collecting"da.
+      collectStatus: 'collecting',
       ...(data.otaChannels && { otaChannels: data.otaChannels }),
       ...(data.lat && data.lng && { location: { type: 'Point', coordinates: [data.lng, data.lat] } }),
     });
@@ -72,11 +75,9 @@ export async function createHotel(req, res, next) {
       city: data.city || req.user.city,
     });
 
-    if (data.lat && data.lng) {
-      autoFindCompetitors(hotel._id, data.lat, data.lng).catch((err) =>
-        console.error('Avto raqib qidirishda xato:', err.message)
-      );
-    }
+    // Onboarding orkestratori — raqobatchi/narx/sharhni fonda yig'adi va
+    // socket orqali jonli progress yuboradi (dashboard modal'i shuni tinglaydi).
+    startCollect(hotel._id, req.user._id, { lat: data.lat, lng: data.lng });
 
     // Internet ma'lumotlarini fonda olib keladi (non-blocking)
     autoEnrich(hotel._id).catch((err) =>
@@ -86,6 +87,22 @@ export async function createHotel(req, res, next) {
     res.status(201).json({ hotel });
   } catch (err) {
     if (err.name === 'ZodError') return res.status(400).json({ error: 'Validatsiya xatosi', details: err.flatten() });
+    next(err);
+  }
+}
+
+// Onboarding yig'ish holati — frontend modal birinchi yuklanishda shu bilan
+// holatni biladi (socket ulanmasdan oldin), keyin socket jonli yangilaydi.
+export async function getCollectStatus(req, res, next) {
+  try {
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    res.json({
+      status: hotel.collectStatus || 'ready',
+      progress: hotel.collectProgress || {},
+      collectedAt: hotel.collectedAt || null,
+    });
+  } catch (err) {
     next(err);
   }
 }
@@ -554,11 +571,10 @@ async function fetchOneCompetitorXotelo(competitor, city) {
  *
  * Hech qanday pullik API ishlatilmaydi.
  */
-export async function instantSnapshot(req, res, next) {
-  try {
-    const hotel = req.hotel;
-    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
-
+// Qayta ishlatiladigan yadro — HTTP handler ham, onboarding orkestratori ham
+// shu funksiyani chaqiradi (o'z kanallar + raqib topish + raqib narxlari +
+// PriceSnapshot yozish). `hotel` to'liq hujjat bo'lishi kerak.
+export async function runInstantSnapshot(hotel) {
     const { getXoteloMergedRates, extractXoteloHotelKey, searchXoteloHotel } =
       await import('../services/xotelo.service.js');
 
@@ -634,7 +650,7 @@ export async function instantSnapshot(req, res, next) {
       ? Math.round((myBest - marketAvg) * roomsCount * 30 * 0.2)
       : 0;
 
-    res.json({
+    return {
       own: { bestPrice: myBest, channels: ownChannels, hotelKey: ownKey || null },
       competitors: competitorSummaries,
       summary: {
@@ -643,7 +659,14 @@ export async function instantSnapshot(req, res, next) {
         competitorsCount: compPrices.length,
       },
       asOf: new Date().toISOString(),
-    });
+    };
+}
+
+export async function instantSnapshot(req, res, next) {
+  try {
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    res.json(await runInstantSnapshot(hotel));
   } catch (err) { next(err); }
 }
 
@@ -1165,7 +1188,7 @@ export async function discoverNearbyHotels(req, res, next) {
   } catch (err) { next(err); }
 }
 
-async function autoFindCompetitors(hotelId, lat, lng) {
+export async function autoFindCompetitors(hotelId, lat, lng) {
   const nearby = await searchNearby([lng, lat], AUTO_DISCOVERY_RADIUS_KM);
   const myHotel = await Hotel.findById(hotelId);
   if (!myHotel) return;

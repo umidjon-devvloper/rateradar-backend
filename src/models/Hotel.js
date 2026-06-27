@@ -82,6 +82,25 @@ const hotelSchema = new mongoose.Schema(
       default: [],
     },
     isActive: { type: Boolean, default: true },
+
+    // ─── Onboarding ma'lumot yig'ish holati ───────────────────────────
+    // Hotel qo'shilgach, fon orkestrator barcha kanal/narx/sharhni yig'adi.
+    // Dashboard "ready" bo'lguncha bloklovchi modal ko'rsatadi.
+    //   pending    — hali boshlanmagan
+    //   collecting — yig'ilyapti (modal ko'rinadi, socket progress oqadi)
+    //   ready      — tayyor (panelga kirish ochiladi)
+    //   error      — xato (qayta urinish mumkin)
+    // Default 'ready' — shunda field yo'q ESKI hotellar bloklanmaydi.
+    // YANGI hotel createHotel'da aniq 'collecting' o'rnatadi.
+    collectStatus: {
+      type: String,
+      enum: ['pending', 'collecting', 'ready', 'error'],
+      default: 'ready',
+      index: true,
+    },
+    // Bosqichlar progressi (jonli ko'rsatish uchun): { step, pct, channels, ... }
+    collectProgress: { type: Object, default: {} },
+    collectedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
