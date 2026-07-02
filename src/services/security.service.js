@@ -87,8 +87,40 @@ export function getClientIp(req) {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
+// ─── Ishonchli IP'lar (hech qachon banlanmaydi) ──────────────────────
+// Loopback/private/link-local — bu proxy (nginx/CF) yoki serverning o'zi.
+// Agar proxy header'lari noto'g'ri sozlansa, BUTUN trafik bitta shunday IP'ga
+// "yig'ilib" qoladi; uni banlash esa hamma foydalanuvchini bloklab qo'yadi.
+// Qo'shimcha ishonchli IP'larni SECURITY_IP_WHITELIST (vergul bilan) orqali beriladi.
+const IP_WHITELIST = new Set(
+  (process.env.SECURITY_IP_WHITELIST || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+function isPrivateIp(ip) {
+  const s = String(ip).replace(/^::ffff:/i, ''); // IPv4-mapped IPv6 normalizatsiya
+  if (s === '127.0.0.1' || s === '::1' || s === 'localhost') return true;
+  if (/^10\./.test(s)) return true;
+  if (/^192\.168\./.test(s)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(s)) return true; // 172.16–172.31
+  if (/^169\.254\./.test(s)) return true; // link-local
+  if (/^(fc|fd)/i.test(s)) return true; // IPv6 ULA (fc00::/7)
+  if (/^fe80:/i.test(s)) return true; // IPv6 link-local
+  return false;
+}
+
+/** Ushbu IP xavfsizlik tekshiruvidan ozod (ban qilinmaydi, bloklanmaydi). */
+export function isExempt(ip) {
+  if (!ip || ip === 'unknown') return true;
+  if (IP_WHITELIST.has(ip)) return true;
+  return isPrivateIp(ip);
+}
+
 // ─── Ban boshqaruvi ──────────────────────────────────────────────────
 export function isBanned(ip) {
+  if (isExempt(ip)) return false; // ishonchli IP hech qachon bloklanmaydi
   const b = bannedIps.get(ip);
   if (!b) return false;
   if (b.permanent) return true;
@@ -98,6 +130,12 @@ export function isBanned(ip) {
 }
 
 export async function banIp(ip, { reason = '', minutes = null, permanent = false, source = 'auto', by = null } = {}) {
+  // Ishonchli/loopback/private IP'ni HECH QACHON banlamaymiz — aks holda
+  // proxy noto'g'ri sozlanganida butun trafik bloklanib qolishi mumkin.
+  if (isExempt(ip)) {
+    console.warn(`[security] ban rad etildi — ishonchli IP: ${ip} (sabab: ${reason})`);
+    return;
+  }
   const until = permanent ? null : new Date(Date.now() + (minutes || CFG.rate.banMinutes) * 60_000);
   bannedIps.set(ip, { until, permanent, reason });
   try {

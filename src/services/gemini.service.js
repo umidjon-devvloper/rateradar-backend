@@ -147,7 +147,7 @@ Qanday ishlaydi:
 
 Support bilan bog'lanish:
 • Telegram: @rateradar_support
-• Email: support@rateradar.uz
+• Email: info@thehotelsaas.com
 
 Qoidalar:
 - Faqat TheHotelSaaS va mehmonxona boshqaruvi haqida javob bering
@@ -170,7 +170,7 @@ export async function chatSupport(messages) {
   const lastMsg = messages[messages.length - 1]?.content || '';
 
   if (!m) {
-    return 'Kechirasiz, AI yordamchi hozir ishlamayapti. Iltimos, bevosita murojaat qiling:\n• Telegram: @rateradar_support\n• Email: support@rateradar.uz';
+    return 'Kechirasiz, AI yordamchi hozir ishlamayapti. Iltimos, bevosita murojaat qiling:\n• Telegram: @rateradar_support\n• Email: info@thehotelsaas.com';
   }
 
   try {
@@ -181,6 +181,6 @@ export async function chatSupport(messages) {
   } catch (err) {
     recordApiUsage('gemini', false, err);
     console.error('Gemini chatSupport xato:', err.message);
-    return 'Texnik xatolik yuz berdi. Iltimos, quyidagi manzillar orqali murojaat qiling:\n• Telegram: @rateradar_support\n• Email: support@rateradar.uz';
+    return 'Texnik xatolik yuz berdi. Iltimos, quyidagi manzillar orqali murojaat qiling:\n• Telegram: @rateradar_support\n• Email: info@thehotelsaas.com';
   }
 }

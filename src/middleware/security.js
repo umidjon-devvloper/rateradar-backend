@@ -9,9 +9,26 @@ import * as sec from '../services/security.service.js';
  *
  * express.json'dan KEYIN ulanadi (body'ni ham tekshirish uchun).
  */
+let lastProxyWarn = 0;
+
 export async function securityGuard(req, res, next) {
   const ip = sec.getClientIp(req);
   req.clientIp = ip;
+
+  // 0) Ishonchli IP (loopback/private/whitelist) — barcha tekshiruvlardan o'tkazamiz.
+  //    Productionda trafik shunday IP'ga yig'ilib qolsa — bu proxy (nginx/CF)
+  //    haqiqiy IP header'ini bermayotganidan darak; ogohlantiramiz (throttled).
+  if (sec.isExempt(ip)) {
+    if (process.env.NODE_ENV === 'production' && Date.now() - lastProxyWarn > 60_000) {
+      lastProxyWarn = Date.now();
+      console.warn(
+        `[security] ⚠️  Mijoz IP ishonchli/loopback sifatida aniqlandi: ${ip}. ` +
+        `Proxy (nginx/Cloudflare) X-Forwarded-For / CF-Connecting-IP header'ini ` +
+        `uzatayotganini tekshiring — aks holda IP-asosli himoya ishlamaydi.`,
+      );
+    }
+    return next();
+  }
 
   // 1) Bloklangan IP
   if (sec.isBanned(ip)) {
