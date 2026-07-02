@@ -53,6 +53,53 @@ export async function findHotels(req, res, next) {
   } catch (err) { next(err); }
 }
 
+/**
+ * GET /search/hotel-details
+ * Booking.com'dan BITTA mehmonxonaning TO'LIQ ma'lumotini jonli skreyp qiladi
+ * (tavsif, qulayliklar, rasmlar, sharhlar, narx). Foydalanuvchi qidiruvda
+ * skreyper topgan natijani bossa, shu yerdan to'liq tafsilot olinadi.
+ *
+ * Parametrlar:
+ *   • bookingUrl — qidiruv natijasidagi Booking.com link (eng to'g'ri yo'l), YOKI
+ *   • q + city   — nom va shahar (avval Booking'da topib, keyin tafsilot oladi).
+ *   • reviews    — nechta sharh olib kelish (default 10).
+ */
+export async function getHotelDetails(req, res, next) {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const { bookingUrl = '', q = '', city = '', reviews = 10 } = req.query;
+    const { scraperEnabled, scraperFindHotel, scraperHotelInfo } =
+      await import('../services/hotelScraper.service.js');
+
+    if (!scraperEnabled()) {
+      return res.status(503).json({ error: 'Skreyper o\'chirilgan yoki sozlanmagan (HOTEL_SCRAPER_ENABLED / HOTEL_SCRAPER_PATH).' });
+    }
+
+    let url = String(bookingUrl || '').trim();
+    let summary = null;
+
+    // URL berilmagan bo'lsa — nom + shahar bo'yicha Booking'dan topamiz.
+    if (!url) {
+      if (!q || q.trim().length < 2) {
+        return res.status(400).json({ error: 'bookingUrl yoki (q + city) kerak' });
+      }
+      summary = await scraperFindHotel(q, city);
+      url = summary?.bookingUrl || '';
+      if (!url) {
+        return res.status(404).json({ error: `"${q}" Booking.com'dan topilmadi` });
+      }
+    }
+
+    const reviewsLimit = Math.min(50, Math.max(0, parseInt(reviews, 10) || 10));
+    const details = await scraperHotelInfo(url, reviewsLimit);
+    if (!details) {
+      return res.status(502).json({ error: 'Booking.com tafsilotlarini olishda xato (sayt bloklagan yoki tuzilma o\'zgargan bo\'lishi mumkin)' });
+    }
+
+    res.json({ source: 'booking_scraper', summary, details });
+  } catch (err) { next(err); }
+}
+
 export async function geocodeAddress(req, res, next) {
   try {
     const { address = '' } = req.query;

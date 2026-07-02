@@ -62,6 +62,42 @@ export async function enrichHotelData({ name, city = '', country = '', countryCo
     }
   }
 
+  // 5. JONLI SKREYPER (oxirgi chora) — narx/reyting/rasm hali topilmagan bo'lsa,
+  //    GOOGLE HOTELS (Booking/Agoda/Expedia/Hotels.com/Trip.com/Priceline) +
+  //    Ostrovok orqali to'ldiramiz. Pullik API (Apify/SerpAPI) bo'lmasa ham keladi.
+  const needsMore = !result.currentPrice || !result.rating || !result.photoUrl || !result.stars;
+  if (needsMore) {
+    try {
+      const { scraperEnabled, scraperAllChannelPrices, scraperFindHotel } = await import('./hotelScraper.service.js');
+      if (scraperEnabled()) {
+        // Barcha kanal narxlari (eng keng qamrov) — eng arzonini "currentPrice" qilamiz.
+        const all = await scraperAllChannelPrices(name, city);
+        const priced = (all?.offers || []).filter((o) => o.price > 0).sort((a, b) => a.price - b.price);
+        if (!result.currentPrice && priced.length) {
+          result.currentPrice = priced[0].price;
+          if (!result.source) result.source = 'google_scraper';
+        }
+        if (!result.rating && all?.rating > 0) result.rating = all.rating;
+        if (!result.reviewCount && all?.reviews > 0) result.reviewCount = all.reviews;
+        if (!result.otaPrices?.length && priced.length) {
+          result.otaPrices = priced.map((o) => ({ source: o.source, price: o.price, via: 'google_scraper' }));
+        }
+
+        // Rasm/yulduz/manzil — Booking qidiruvidan (Google Hotels rasm bermaydi).
+        if (!result.photoUrl || !result.stars || !result.address) {
+          const s = await scraperFindHotel(name, city).catch(() => null);
+          if (s) {
+            if (!result.photoUrl && s.photoUrl) result.photoUrl = s.photoUrl;
+            if (!result.stars && s.stars > 0) result.stars = s.stars;
+            if (!result.address && s.address) result.address = s.address;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Skreyper enrich xato:', err.message);
+    }
+  }
+
   return result;
 }
 

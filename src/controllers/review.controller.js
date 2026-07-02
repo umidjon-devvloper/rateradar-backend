@@ -130,6 +130,43 @@ async function persistReviews(hotelId, items) {
   return { added, updated, skipped };
 }
 
+/**
+ * Booking.com JONLI SKREYPER orqali sharhlarni olib, 14 kunlik oynaga
+ * filtrlab bazaga saqlaydi. SerpAPI/Apify kalitlari yo'q bo'lsa ham ishlaydi.
+ * @returns {{added, skipped, total, bookingUrl, matchedName}|null}
+ */
+async function scrapeBookingReviewsAndPersist(hotel) {
+  const { scraperEnabled, scraperReviews } = await import('../services/hotelScraper.service.js');
+  if (!scraperEnabled()) return null;
+
+  const { reviews, bookingUrl, matchedName } = await scraperReviews(hotel.name, hotel.city, 20);
+
+  // Eski Booking sharhlarini (14 kunlik oynadan tashqari) tozalaymiz
+  await purgeOldReviews(hotel._id, 'Booking.com');
+  if (!reviews.length) return { added: 0, skipped: 0, total: 0, bookingUrl, matchedName };
+
+  let added = 0;
+  let skipped = 0;
+  for (const r of reviews) {
+    const pub = parseReviewDate(r.date);
+    if (!isWithinWindow(pub)) { skipped += 1; continue; }
+    const dedup = `${r.author}:${(r.text || '').slice(0, 40)}`;
+    const externalId = `bookingscraper:${bookingUrl || hotel.name}:${dedup}`.slice(0, 200);
+    try {
+      const exists = await Review.findOne({ ownerHotelId: hotel._id, externalId });
+      if (exists) continue;
+      await Review.create({
+        targetType: 'own', targetId: hotel._id, ownerHotelId: hotel._id,
+        platform: 'Booking.com', externalId,
+        author: r.author, rating: r.rating, text: r.text,
+        publishedAt: pub, sentiment: ratingToSentiment(r.rating), seenByUser: false,
+      });
+      added += 1;
+    } catch { continue; }
+  }
+  return { added, skipped, total: reviews.length, bookingUrl, matchedName };
+}
+
 export async function listReviews(req, res, next) {
   try {
     const hotel = req.hotel;
@@ -290,21 +327,40 @@ export async function scrapeReviews(req, res, next) {
       });
     }
 
-    if (!propertyToken) {
-      return res.json({
-        added: 0,
-        propertyToken: '',
-        matchedPlace: null,
-        notFound: true,
-        message: `"${hotel.name}" Google Hotels'da topilmadi. Mehmonxona nomini aniqlashtiring.`,
+    // SerpAPI muvaffaqiyatsiz (token yo'q yoki sharh qaytarmadi) — Booking.com
+    // JONLI SKREYPER fallback. Shu tufayli hech qaysi pullik kalit bo'lmasa ham
+    // sharhlar (14 kunlik) keladi.
+    if (!propertyToken || !reviews.length) {
+      const bs = await scrapeBookingReviewsAndPersist(hotel).catch((e) => {
+        console.warn('Booking sharh skreyper xato:', e.message);
+        return null;
       });
-    }
-
-    if (propertyToken !== hotel.serpPropertyToken) {
-      await Hotel.findByIdAndUpdate(hotel._id, { serpPropertyToken: propertyToken });
-    }
-
-    if (!reviews.length) {
+      if (bs && (bs.added > 0 || bs.total > 0)) {
+        return res.json({
+          added: bs.added,
+          skipped: bs.skipped,
+          windowDays: REVIEW_WINDOW_DAYS,
+          total: bs.total,
+          source: 'booking_scraper',
+          matchedPlace: bs.matchedName ? { name: bs.matchedName } : null,
+          addedBySource: bs.added ? { 'Booking.com': bs.added } : {},
+          totalBySource: { 'Booking.com': bs.total },
+          sources: ['Booking.com'],
+          message: bs.added === 0 && bs.total > 0
+            ? `Booking.com'da ${bs.total} ta sharh topildi, lekin oxirgi ${REVIEW_WINDOW_DAYS} kun ichida yangisi yo'q`
+            : undefined,
+        });
+      }
+      // Skreyper ham topa olmadi — asl SerpAPI xabarlari.
+      if (!propertyToken) {
+        return res.json({
+          added: 0,
+          propertyToken: '',
+          matchedPlace: null,
+          notFound: true,
+          message: `"${hotel.name}" Google Hotels va Booking.com'da topilmadi. Mehmonxona nomini aniqlashtiring.`,
+        });
+      }
       return res.json({
         added: 0,
         propertyToken,
@@ -312,6 +368,10 @@ export async function scrapeReviews(req, res, next) {
         bySource: {},
         message: `"${matchedPlace?.name || hotel.name}" uchun hozircha sharh yo'q`,
       });
+    }
+
+    if (propertyToken !== hotel.serpPropertyToken) {
+      await Hotel.findByIdAndUpdate(hotel._id, { serpPropertyToken: propertyToken });
     }
 
     let added = 0;

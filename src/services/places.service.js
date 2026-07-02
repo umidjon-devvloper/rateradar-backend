@@ -27,8 +27,25 @@ export async function searchHotels(query, countryCode = '', cityContext = {}) {
   const osmResults = await osmSearch(query, countryCode, cityContext);
   if (osmResults.length) return filterByCityContext(osmResults, cityContext);
 
-  // 4. Overpass — butun shahar bo'yicha nom qidirish (oxirgi fallback)
-  return await osmNearbyNameSearch(query, cityContext);
+  // 4. Overpass — butun shahar bo'yicha nom qidirish
+  const overpassResults = await osmNearbyNameSearch(query, cityContext);
+  if (overpassResults.length) return overpassResults;
+
+  // 5. Booking.com JONLI SKREYPER (oxirgi chora) — yuqoridagi hech qaysi manba
+  //    mehmonxonani topmasa, Booking.com'ni real vaqtda skreyp qilib aniq
+  //    ma'lumot (nom, manzil, narx, reyting, rasm, koordinata) olib kelamiz.
+  //    Shu tufayli foydalanuvchi izlagan mehmonxona deyarli har doim topiladi.
+  try {
+    const { scraperEnabled, scraperSearchHotels } = await import('./hotelScraper.service.js');
+    if (scraperEnabled()) {
+      const scraped = await scraperSearchHotels(query, cityContext);
+      if (scraped.length) return scraped;
+    }
+  } catch (err) {
+    console.warn('Booking skreyper fallback xato:', err.message);
+  }
+
+  return [];
 }
 
 // ─── Shahar bo'yicha BARCHA hotellar (onboarding ro'yxati) ───────────

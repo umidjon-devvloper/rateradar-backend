@@ -43,6 +43,21 @@ const schema = z.object({
   CITIES_SOURCE: z.enum(['auto', 'api', 'local']).default('auto'),
   GOOGLE_PLACES_API_KEY: z.string().optional(),
   MAKCORPS_API_KEY: z.string().optional(),
+
+  // ─── Hotels scraper MIKROSERVISI (alohida puppeteer server) ────────────
+  // Boshqa BARCHA manba (Google Places, SERP, OSM/Overpass) hotelni topmasa,
+  // oxirgi chora sifatida shu skreyper serveriga HTTP so'rov yuboriladi va u
+  // Booking.com'ni real vaqtda skreyp qilib aniq ma'lumot (nom, manzil, narx,
+  // reyting, rasm) qaytaradi. Skreyper `hotels-scraper-js` papkasida alohida
+  // ishlaydi: `npm run dev` (fastify API, default port 3000).
+  //   • HOTEL_SCRAPER_ENABLED  — 'true' (default) yoki 'false' bilan o'chiriladi.
+  //   • HOTEL_SCRAPER_URL      — skreyper server manzili (default http://localhost:3000).
+  //   • HOTEL_SCRAPER_API_KEY  — skreyper .env dagi API_KEYS kalitlaridan biri.
+  //       Default 'dev-key-123' — skreyperning bootstrap kaliti bilan bir xil,
+  //       shunda lokalda hech narsa sozlamasdan ishlaydi. Productionda almashtiring.
+  HOTEL_SCRAPER_ENABLED: z.enum(['true', 'false']).default('true'),
+  HOTEL_SCRAPER_URL: z.string().default('http://localhost:3000'),
+  HOTEL_SCRAPER_API_KEY: z.string().default('dev-key-123'),
   ADMIN_EMAIL: z.string().email().default('admin@rateradar.com'),
   ADMIN_PASSWORD: z.string().default('changeme123'),
   // API hujjatlari (/api/docs) uchun Basic Auth login. DOCS_PASSWORD

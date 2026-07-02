@@ -347,6 +347,7 @@ export async function getRoomShopper(req, res, next) {
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
 
     const days = Math.min(30, Math.max(1, parseInt(req.query.days) || 7));
+    const provider = (req.query.provider || 'booking').toLowerCase();
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -356,6 +357,44 @@ export async function getRoomShopper(req, res, next) {
       const d = new Date(today);
       d.setDate(today.getDate() + i);
       columns.push(d.toISOString().slice(0, 10));
+    }
+
+    // ── BOOKING EMAS KANAL — saqlangan PriceSnapshot (Google Hotels/Ostrovok)
+    //    narxini o'qiymiz. "Narxlarni yangilash" barcha kanalni saqlaydi.
+    //    Bu kanallarda xona-darajasi yo'q — hotel narxi bitta qator bo'lib chiqadi.
+    if (provider !== 'booking') {
+      const OTA_LABELS = {
+        agoda: 'Agoda', expedia: 'Expedia', hotelscom: 'Hotels.com',
+        tripcom: 'Trip.com', priceline: 'Priceline', ostrovok: 'Ostrovok',
+      };
+      const ota = OTA_LABELS[provider] || provider;
+      const since = new Date(Date.now() - 14 * 86400_000);
+      const snap = await PriceSnapshot.findOne({
+        ownerHotelId: hotel._id, targetType: 'own', ota,
+        snapshotAt: { $gte: since },
+      }).sort({ snapshotAt: -1 }).lean();
+
+      if (!snap || !(snap.price > 0)) {
+        return res.json({
+          days, columns, rows: [], hasRealData: false, provider,
+          myHotel: { name: hotel.name, stars: hotel.stars },
+          message: `${ota} narxi yo'q — yuqorida "Narxlarni yangilash" tugmasini bosing`,
+        });
+      }
+
+      const marketAvgByDay = await realMarketAvgByDay(hotel, columns, today, days);
+      const prices = {};
+      for (const dateStr of columns) {
+        const price = Math.round(snap.price);
+        const market = marketAvgByDay[dateStr] || 0;
+        const diff = market > 0 ? Math.round(((price - market) / market) * 100) : 0;
+        prices[dateStr] = { price, diff, marketAvg: market };
+      }
+      return res.json({
+        days, columns, provider, hasRealData: true,
+        myHotel: { name: hotel.name, stars: hotel.stars },
+        rows: [{ room: { name: `${ota} — eng arzon narx`, guests: 2, sqm: 0, description: '' }, prices }],
+      });
     }
 
     // 1. Booking.com RapidAPI (kalit bo'lsa) — real xona turlari
@@ -457,7 +496,6 @@ export async function refreshRoomShopper(req, res, next) {
   try {
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
-    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
 
     // Anchor sana — bugundan +7 kun, 1 kechalik (kelajak bo'lishi shart).
     const checkIn = new Date();
@@ -467,48 +505,80 @@ export async function refreshRoomShopper(req, res, next) {
     const ciStr = checkIn.toISOString().slice(0, 10);
     const coStr = checkOut.toISOString().slice(0, 10);
 
-    // Booking URL — saqlangan yoki SerpAPI orqali topamiz.
-    const otaUrls = normalizeOtaUrls(hotel.otaUrls);
-    let bookingUrl = otaUrls['Booking.com'] || null;
-    if (!bookingUrl) {
-      bookingUrl = await findBookingUrl(hotel.name, hotel.city);
+    let roomTypes = [];
+    let minPrice = 0;
+    let currency = 'USD';
+    let bookingUrl = null;
+    let via = null;
+
+    // ── 1. Apify (sozlangan bo'lsa) — eng aniq manba ──────────────────────
+    if (hasApify()) {
+      const otaUrls = normalizeOtaUrls(hotel.otaUrls);
+      bookingUrl = otaUrls['Booking.com'] || null;
+      if (!bookingUrl) {
+        bookingUrl = await findBookingUrl(hotel.name, hotel.city);
+        if (bookingUrl) {
+          await Hotel.updateOne(
+            { _id: hotel._id },
+            { $set: { 'otaUrls.Booking.com': bookingUrl } }
+          ).catch(() => {});
+        }
+      }
       if (bookingUrl) {
-        await Hotel.updateOne(
-          { _id: hotel._id },
-          { $set: { 'otaUrls.Booking.com': bookingUrl } }
-        ).catch(() => {});
+        const apify = await getBookingRoomsApify(bookingUrl, { checkIn: ciStr, checkOut: coStr });
+        if (apify.rooms?.length) {
+          roomTypes = apify.rooms.slice(0, 8).map((r) => ({
+            name: r.name,
+            guests: r.guests,
+            sqm: 0, // Apify scraper m² bermaydi
+            description: r.bedType || '',
+            basePrice: r.price,
+          }));
+          minPrice = apify.minPrice || 0;
+          currency = apify.currency || 'USD';
+          via = 'apify';
+        }
       }
     }
 
-    if (!bookingUrl) {
-      return res.status(404).json({
-        error: 'Booking URL topilmadi. Sozlamalarda kiriting yoki SerpAPI kaliti sozlanganligini tekshiring.',
-      });
+    // ── 2. Skreyper fallback — Apify yo'q yoki natija bermadi ──────────────
+    // Booking property sahifasidagi #hprt-table'ni real vaqtda skreyp qiladi.
+    if (!roomTypes.length) {
+      try {
+        const { scraperEnabled, scraperRooms } = await import('../services/hotelScraper.service.js');
+        if (scraperEnabled()) {
+          const sr = await scraperRooms(hotel.name, hotel.city, { checkIn: ciStr, checkOut: coStr });
+          if (sr.rooms?.length) {
+            roomTypes = sr.rooms.slice(0, 8).map((r) => ({
+              name: r.name,
+              guests: r.guests,
+              sqm: 0,
+              description: '',
+              basePrice: r.price,
+            }));
+            minPrice = sr.minPrice || 0;
+            currency = sr.currency || 'USD';
+            bookingUrl = sr.bookingUrl || bookingUrl;
+            via = 'scraper';
+          }
+        }
+      } catch (e) {
+        console.warn('[refresh-rooms] skreyper xato:', e.message);
+      }
     }
 
-    const { rooms, minPrice, currency } = await getBookingRoomsApify(bookingUrl, {
-      checkIn: ciStr,
-      checkOut: coStr,
-    });
-
-    if (!rooms.length) {
+    if (!roomTypes.length) {
       return res.json({
         found: false,
         roomsCount: 0,
         bookingUrl,
-        message: 'Booking sahifasidan xona narxi kelmadi (band yoki sana mavjud emas)',
+        message: bookingUrl
+          ? 'Booking sahifasidan xona narxi kelmadi (band yoki sana mavjud emas)'
+          : 'Booking URL topilmadi va skreyper xona topa olmadi',
       });
     }
 
     // Real xonalarni hotel.roomTypes'ga saqlaymiz.
-    const roomTypes = rooms.slice(0, 8).map((r) => ({
-      name: r.name,
-      guests: r.guests,
-      sqm: 0, // Apify scraper m² bermaydi
-      description: r.bedType || '',
-      basePrice: r.price,
-    }));
-
     const update = { roomTypes };
     if (minPrice > 0) {
       update.currentPrice = minPrice;
@@ -524,6 +594,7 @@ export async function refreshRoomShopper(req, res, next) {
       checkIn: ciStr,
       checkOut: coStr,
       bookingUrl,
+      via,
       rooms: roomTypes.map((r) => ({ name: r.name, price: r.basePrice })),
     });
   } catch (err) {
@@ -786,7 +857,10 @@ async function persistOtaUrl(hotel, key, url) {
  */
 export async function refreshAllChannels(req, res, next) {
   try {
-    if (!hasSerpApi()) return res.status(503).json({ error: 'SERPAPI_API_KEY sozlanmagan' });
+    // SerpAPI YO'Q bo'lsa ham to'xtamaymiz — to'g'ridan-to'g'ri fallback (HasData/
+    // Apify) va oxir-oqibat Booking.com JONLI SKREYPER orqali narx olamiz.
+    // Foydalanuvchi "Narxlarni yangilash" bossa, token bo'lmasa darrov skreyp.
+    const useSerp = hasSerpApi();
 
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
@@ -803,7 +877,7 @@ export async function refreshAllChannels(req, res, next) {
     const coStr = checkOut.toISOString().slice(0, 10);
 
     const summary = {
-      provider: 'serpapi',
+      provider: useSerp ? 'serpapi' : 'scraper',
       checkIn: ciStr,
       checkOut: coStr,
       own: { channels: 0, otaPrices: [], message: '' },
@@ -815,10 +889,14 @@ export async function refreshAllChannels(req, res, next) {
     // ── 1. O'z mehmonxona — 1 ta SerpAPI so'rovi ─────────────────────────
     emitProgress({ stage: 'own', status: 'searching' });
     try {
-      const data = await getSerpApiHotelData({
-        name: hotel.name, city: hotel.city, countryCode: hotel.countryCode,
-        propertyToken: hotel.serpPropertyToken || '',
-      });
+      // SerpAPI bo'lsa undan boshlaymiz; bo'lmasa data=null va to'g'ridan-to'g'ri
+      // pastdagi waterfall fallback (HasData/Apify/Booking skreyper) ishlaydi.
+      const data = useSerp
+        ? await getSerpApiHotelData({
+            name: hotel.name, city: hotel.city, countryCode: hotel.countryCode,
+            propertyToken: hotel.serpPropertyToken || '',
+          })
+        : null;
 
       const resolvedCurrency = data?.currency || 'USD';
 
@@ -854,6 +932,36 @@ export async function refreshAllChannels(req, res, next) {
           });
           emitProgress({ stage: 'own', channel: label, status: 'done', price: ota.price, via: 'serpapi' });
         }
+      }
+
+      // ── Google Hotels agregatori — bitta skreypda BARCHA OTA narxlari ──
+      // SerpAPI hech narsa bermagan bo'lsa (kalit yo'q yoki topmadi), Google
+      // Hotels'dan Booking+Agoda+Expedia+Hotels.com+Trip.com+Priceline'ni olamiz.
+      if (collected.size === 0) {
+        try {
+          const { scraperEnabled, scraperAllChannelPrices } = await import('../services/hotelScraper.service.js');
+          if (scraperEnabled()) {
+            const gh = await scraperAllChannelPrices(hotel.name, hotel.city);
+            for (const o of (gh?.offers || [])) {
+              const label = canonLabel(o.source);
+              if (o.price > 0 && !collected.has(label)) {
+                collected.set(label, { source: label, price: o.price, currency: 'USD', via: 'google_scraper' });
+                await PriceSnapshot.create({
+                  targetType: 'own', targetId: hotel._id, ownerHotelId: hotel._id,
+                  ota: label, price: o.price, currency: 'USD', checkIn, checkOut, source: 'google_scraper',
+                }).catch(() => {});
+                emitProgress({ stage: 'own', channel: label, status: 'done', price: o.price, via: 'google' });
+              }
+            }
+            // Reyting/sharhni ham yangilaymiz (Google Hotels'dan).
+            if (gh?.rating > 0 || gh?.reviews > 0) {
+              const upd = {};
+              if (gh.rating > 0) upd.rating = gh.rating;
+              if (gh.reviews > 0) upd.reviewCount = gh.reviews;
+              if (Object.keys(upd).length) await Hotel.updateOne({ _id: hotel._id }, { $set: upd }).catch(() => {});
+            }
+          }
+        } catch (e) { console.warn('[refresh] google own xato:', e.message); }
       }
 
       // ── Waterfall fallback: yetishmagan 5 kanalni to'ldiramiz ──────────
@@ -953,9 +1061,11 @@ export async function refreshAllChannels(req, res, next) {
         index: compIndex, total: competitors.length, status: 'processing',
       });
       try {
-        const data = await getSerpApiHotelData({
-          name: comp.name, city: hotel.city, countryCode: hotel.countryCode,
-        });
+        const data = useSerp
+          ? await getSerpApiHotelData({
+              name: comp.name, city: hotel.city, countryCode: hotel.countryCode,
+            })
+          : null;
         // Google aggregator olib tashlanadi.
         const compCurrency = data?.currency || 'USD';
         const serpOtas = (data?.otaPrices || []).filter((o) => {
@@ -968,9 +1078,26 @@ export async function refreshAllChannels(req, res, next) {
         }));
 
         // SerpAPI raqibni topsa — undan olaveramiz. Topolmasa (bo'sh) —
-        // raqibni HasData/Apify fallback'ga yuboramiz (foydalanuvchi so'rovi).
+        // avval Google Hotels (bitta skreypda barcha OTA), keyin HasData/Apify.
         let otaPrices = serpOtas;
         let viaFallback = false;
+
+        // Google Hotels agregatori — raqib uchun bitta skreypda barcha OTA narxlari.
+        if (!otaPrices.length) {
+          try {
+            const { scraperEnabled, scraperAllChannelPrices } = await import('../services/hotelScraper.service.js');
+            if (scraperEnabled()) {
+              const gh = await scraperAllChannelPrices(comp.name, hotel.city);
+              otaPrices = (gh?.offers || [])
+                .filter((o) => o.price > 0)
+                .map((o) => ({ source: o.source, price: o.price, currency: 'USD', via: 'google_scraper' }));
+              viaFallback = otaPrices.length > 0;
+              if (gh?.rating > 0 && !comp.rating) comp.rating = gh.rating;
+              if (gh?.reviews > 0 && !comp.reviewCount) comp.reviewCount = gh.reviews;
+            }
+          } catch (e) { console.warn('[refresh] google raqib xato:', e.message); }
+        }
+
         if (!otaPrices.length) {
           const compTarget = { name: comp.name, city: hotel.city, otaUrls: {}, persist: null };
           const fbChannels = TARGET_CHANNELS.filter((c) => c.label !== 'Agoda');

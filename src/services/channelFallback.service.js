@@ -51,6 +51,20 @@ export async function fetchChannelFallback(target, label, ciStr, coStr) {
         });
         if (ap?.price > 0) return { price: ap.price, link: ap.link, via: 'apify', currency: 'USD' };
       }
+      // 3) Booking.com'ning O'Z saytini TO'G'RIDAN-TO'G'RI skreyp — Google Hotels
+      //    Booking narxini bermaganda "booking.com saytiga yuborish". Faqat Booking
+      //    narxi (boshqa kanal aralashmaydi). +7 kunga bo'sh bo'lmasa +30 bilan qayta.
+      const { scraperEnabled, scraperFindHotel } = await import('./hotelScraper.service.js');
+      if (scraperEnabled()) {
+        let m = await scraperFindHotel(name, city, 7);
+        if (m && !(m.currentPrice > 0)) {
+          const later = await scraperFindHotel(name, city, 30);
+          if (later && later.currentPrice > 0) m = later;
+        }
+        if (m && m.currentPrice > 0) {
+          return { price: m.currentPrice, link: m.bookingUrl, via: 'booking_scraper', currency: 'USD' };
+        }
+      }
       return null;
     }
 

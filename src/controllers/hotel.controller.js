@@ -388,7 +388,11 @@ export async function getOtaChannels(req, res, next) {
     const recentSnaps = await PriceSnapshot.find({
       ownerHotelId: hotel._id,
       targetType: 'own',
-      source: { $in: ['serpapi', 'hasdata', 'apify'] },
+      // "Narxlarni yangilash" (refresh-all) SerpAPI sozlanmaganda Google Hotels
+      // skreyperidan ('google_scraper') va Booking jonli skreyperidan
+      // ('booking_scraper') yozadi. Ularni ham o'qimasak, yig'ilgan narxlar bu
+      // sahifada ko'rinmay qoladi (bo'sh "kanal narxi yo'q" holati).
+      source: { $in: ['serpapi', 'hasdata', 'apify', 'google_scraper', 'booking_scraper'] },
       snapshotAt: { $gte: sevenDaysAgo },
     }).sort({ snapshotAt: -1 }).lean();
 
@@ -511,6 +515,17 @@ export async function getHotelXoteloRates(req, res, next) {
  * instantSnapshot ichida parallel ishlatiladi.
  */
 async function fetchOneCompetitorXotelo(competitor, city) {
+  // Yaqinda (< 2 daqiqa) narx olingan bo'lsa — masalan skreyper discovery'da —
+  // qayta skreyp/Xotelo qilmaymiz, keshlangan narxni qaytaramiz.
+  if (
+    competitor.lastPriceFetchedAt &&
+    Date.now() - new Date(competitor.lastPriceFetchedAt).getTime() < 2 * 60 * 1000 &&
+    competitor.latestPrices?.size
+  ) {
+    const prices = [...competitor.latestPrices.values()].filter((p) => p > 0);
+    if (prices.length) return { best: Math.min(...prices), count: prices.length };
+  }
+
   const { findTripAdvisorUrl, getXoteloRates, extractXoteloHotelKey } =
     await import('../services/xotelo.service.js');
 
@@ -531,6 +546,29 @@ async function fetchOneCompetitorXotelo(competitor, city) {
   const data = await getXoteloRates(key).catch(() => null);
   const rates = (data?.rates || []).filter((r) => r.price > 0);
   if (!rates.length) {
+    // Xotelo bu raqib uchun narx topmadi — Booking.com JONLI SKREYPER fallback.
+    try {
+      const { scraperEnabled, scraperPriceForHotel } = await import('../services/hotelScraper.service.js');
+      if (scraperEnabled()) {
+        const sp = await scraperPriceForHotel(competitor.name, city);
+        if (sp?.price > 0) {
+          if (!competitor.latestPrices) competitor.latestPrices = new Map();
+          competitor.latestPrices.set('bookingcom', sp.price);
+          competitor.lastPriceFetchedAt = new Date();
+          await competitor.save().catch(() => {});
+
+          const ci = new Date(); ci.setDate(ci.getDate() + 7);
+          const co = new Date(ci); co.setDate(co.getDate() + 1);
+          await PriceSnapshot.create({
+            targetType: 'competitor', targetId: competitor._id, ownerHotelId: competitor.ownerHotelId,
+            ota: 'Booking.com', price: sp.price, currency: 'USD', checkIn: ci, checkOut: co, source: 'booking_scraper',
+          }).catch(() => {});
+
+          return { best: sp.price, count: 1 };
+        }
+      }
+    } catch (err) { console.warn('[snapshot] skreyper raqib narx xato:', err.message); }
+
     competitor.lastPriceFetchedAt = new Date();
     await competitor.save().catch(() => {});
     return null;
@@ -606,6 +644,27 @@ export async function runInstantSnapshot(hotel) {
         }).catch(() => {});
       }
     }
+
+    // Xotelo o'z narxni topmasa — Booking.com JONLI SKREYPER fallback.
+    if (!ownChannels.length) {
+      try {
+        const { scraperEnabled, scraperPriceForHotel } = await import('../services/hotelScraper.service.js');
+        if (scraperEnabled()) {
+          const sp = await scraperPriceForHotel(hotel.name, hotel.city);
+          if (sp?.price > 0) {
+            ownChannels = [{ source: 'Booking.com', price: sp.price, checkIn: null }];
+            const ci = new Date();
+            const co = new Date(ci); co.setDate(co.getDate() + 1);
+            await PriceSnapshot.create({
+              targetType: 'own', targetId: hotel._id, ownerHotelId: hotel._id,
+              ota: 'Booking.com', price: sp.price, currency: 'USD',
+              checkIn: ci, checkOut: co, source: 'booking_scraper',
+            }).catch(() => {});
+          }
+        }
+      } catch (err) { console.warn('[snapshot] skreyper own narx xato:', err.message); }
+    }
+
     const myBest = ownChannels.length ? ownChannels[0].price : (hotel.currentPrice || 0);
 
     // ── 2. RAQIBLAR (yo'q bo'lsa avtomatik topamiz) ────────────────────
@@ -613,9 +672,15 @@ export async function runInstantSnapshot(hotel) {
     if (!competitors.length) {
       const coords = hotel.location?.coordinates || [];
       const lng = coords[0], lat = coords[1];
+      // 2a. Google Places / OSM — koordinata bo'yicha yaqin atrofdan.
       if (lat && lng) {
         await autoFindCompetitors(hotel._id, lat, lng).catch(() => {});
         competitors = await Competitor.find({ ownerHotelId: hotel._id, isActive: true });
+      }
+      // 2b. Booking.com SKREYPER fallback — yuqoridagilar topmasa (yoki koordinata
+      //     yo'q bo'lsa) shahar bo'yicha eng mashhur 5 hotelni narxi bilan topadi.
+      if (!competitors.length) {
+        competitors = await discoverCompetitorsViaScraper(hotel).catch(() => []);
       }
     }
 
@@ -713,7 +778,6 @@ export async function getMyCategoryRatings(req, res, next) {
       });
     }
 
-    const { getBookingCategoryRatings, hasHasData } = await import('../services/hasdata.service.js');
     const fallback = () => res.json({
       configured: Boolean(cached),
       overall: hotel.categoryRatings?.overall || 0,
@@ -721,29 +785,43 @@ export async function getMyCategoryRatings(req, res, next) {
       asOf: hotel.categoryRatingsAt || null,
     });
 
-    if (!hasHasData()) return fallback();
+    let data = null;
 
-    // Booking URL — saqlangan bo'lsa o'shani, bo'lmasa SerpAPI orqali topamiz.
-    let bookingUrl = hotel.otaUrls?.['Booking.com'] || hotel.otaUrls?.Booking || '';
-    if (!bookingUrl) {
-      try {
-        bookingUrl = await findBookingUrl(hotel.name, hotel.city);
-      } catch { bookingUrl = ''; }
+    // 1) HasData (kalit bo'lsa) — Booking URL bilan.
+    const { getBookingCategoryRatings, hasHasData } = await import('../services/hasdata.service.js');
+    if (hasHasData()) {
+      let bookingUrl = hotel.otaUrls?.['Booking.com'] || hotel.otaUrls?.Booking || '';
+      if (!bookingUrl) {
+        try { bookingUrl = await findBookingUrl(hotel.name, hotel.city); } catch { bookingUrl = ''; }
+        if (bookingUrl) {
+          const nextOtaUrls = { ...(hotel.otaUrls || {}), 'Booking.com': bookingUrl };
+          await Hotel.updateOne({ _id: hotel._id }, { $set: { otaUrls: nextOtaUrls } }).catch(() => {});
+        }
+      }
       if (bookingUrl) {
-        const nextOtaUrls = { ...(hotel.otaUrls || {}), 'Booking.com': bookingUrl };
-        await Hotel.updateOne({ _id: hotel._id }, { $set: { otaUrls: nextOtaUrls } }).catch(() => {});
+        try { data = await getBookingCategoryRatings({ bookingUrl }); }
+        catch (err) { console.warn('Category ratings (hasdata) xato:', err.message); }
       }
     }
-    if (!bookingUrl) {
-      return res.json({ configured: false, categories: [], reason: 'no_booking_url' });
+
+    // 2) JONLI SKREYPER fallback — HasData yo'q yoki natija bermadi. Booking
+    //    URL'ni o'zi topadi (kalit/sozlama kerak emas).
+    if (!data?.scores || !Object.keys(data.scores).length) {
+      try {
+        const { scraperEnabled, scraperCategoryRatings } = await import('../services/hotelScraper.service.js');
+        if (scraperEnabled()) {
+          const sc = await scraperCategoryRatings(hotel.name, hotel.city);
+          if (sc?.scores && Object.keys(sc.scores).length) {
+            data = { overall: sc.overall, scores: sc.scores };
+            if (sc.bookingUrl && !(hotel.otaUrls?.['Booking.com'])) {
+              const nextOtaUrls = { ...(hotel.otaUrls || {}), 'Booking.com': sc.bookingUrl };
+              await Hotel.updateOne({ _id: hotel._id }, { $set: { otaUrls: nextOtaUrls } }).catch(() => {});
+            }
+          }
+        }
+      } catch (err) { console.warn('Category ratings (scraper) xato:', err.message); }
     }
 
-    let data = null;
-    try {
-      data = await getBookingCategoryRatings({ bookingUrl });
-    } catch (err) {
-      console.warn('Category ratings xato:', err.message);
-    }
     if (!data?.scores || !Object.keys(data.scores).length) {
       if (cached) return fallback();
       return res.json({ configured: false, categories: [], reason: 'no_data' });
@@ -1218,6 +1296,61 @@ export async function autoFindCompetitors(hotelId, lat, lng) {
   }
 }
 
+// Nomdan barqaror slug — skreyper raqobatchilari uchun dedup kaliti (googlePlaceId).
+function nameSlug(s) {
+  return String(s)
+    .toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+/**
+ * RAQOBATCHI TOPISH — Booking.com JONLI SKREYPER orqali (Google/OSM fallback).
+ * Shahar bo'yicha eng mashhur hotellarni topadi, narxi BILAN (bir so'rovda) va
+ * Competitor sifatida saqlaydi. Koordinata yo'q hotellar uchun ham ishlaydi.
+ * @returns {Promise<Array>} saqlangan Competitor hujjatlari
+ */
+async function discoverCompetitorsViaScraper(hotel) {
+  const { scraperEnabled, scraperDiscoverCity } = await import('../services/hotelScraper.service.js');
+  if (!scraperEnabled() || !hotel.city) return [];
+
+  const found = await scraperDiscoverCity(hotel.city, hotel.name, AUTO_DISCOVERY_LIMIT).catch(() => []);
+  if (!found.length) return [];
+
+  const docs = found.map((h) => ({
+    ownerHotelId: hotel._id,
+    name: h.name,
+    address: h.address || hotel.city,
+    googlePlaceId: `booking:${nameSlug(h.name)}`,
+    bookingUrl: h.bookingUrl || '',
+    stars: h.stars || 0,
+    rating: h.rating || 0,
+    reviewCount: h.reviews || 0,
+    photoUrl: h.photoUrl || '',
+    location: { type: 'Point', coordinates: [Number(h.lng) || 0, Number(h.lat) || 0] },
+    latestPrices: h.currentPrice > 0 ? { bookingcom: h.currentPrice } : {},
+    lastPriceFetchedAt: h.currentPrice > 0 ? new Date() : null,
+    autoAdded: true,
+  }));
+
+  try { await Competitor.insertMany(docs, { ordered: false }); } catch {}
+
+  const saved = await Competitor.find({ ownerHotelId: hotel._id, isActive: true });
+
+  // Narxli raqobatchilar uchun trend snapshot'i.
+  const ci = new Date(); ci.setDate(ci.getDate() + 7);
+  const co = new Date(ci); co.setDate(co.getDate() + 1);
+  for (const c of saved) {
+    const price = c.latestPrices?.get?.('bookingcom');
+    if (price > 0) {
+      await PriceSnapshot.create({
+        targetType: 'competitor', targetId: c._id, ownerHotelId: hotel._id,
+        ota: 'Booking.com', price, currency: 'USD', checkIn: ci, checkOut: co, source: 'booking_scraper',
+      }).catch(() => {});
+    }
+  }
+  return saved;
+}
+
 // SerpAPI sana stringi (masalan "2 weeks ago", "3 months ago", "2024-12-15")
 function parseSerpDate(s) {
   if (!s) return new Date();
@@ -1239,6 +1372,17 @@ function haversine(lat1, lon1, lat2, lon2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
 }
 
+// Skreyper raqib-topishni bir hotel uchun tez-tez (har sahifa yuklanishida)
+// qayta ishga tushirmaslik throttle'i — skreyper 0 qaytarsa ham 30 daqiqa kutadi.
+const _scraperDiscTried = new Map();
+function shouldTryScraperDiscovery(hotelId) {
+  const k = String(hotelId);
+  const last = _scraperDiscTried.get(k);
+  if (last && Date.now() - last < 30 * 60 * 1000) return false;
+  _scraperDiscTried.set(k, Date.now());
+  return true;
+}
+
 export async function getCompetitors(req, res, next) {
   try {
     const myHotel = req.hotel;
@@ -1247,6 +1391,15 @@ export async function getCompetitors(req, res, next) {
     const [lng, lat] = myHotel.location?.coordinates || [];
     if (existingCount < AUTO_DISCOVERY_LIMIT && lat && lng) {
       await autoFindCompetitors(myHotel._id, lat, lng);
+    }
+
+    // Google/OSM hech narsa topmasa (yoki koordinata yo'q bo'lsa) — Booking.com
+    // JONLI SKREYPER fallback: shahar bo'yicha eng mashhur 5 hotelni narxi bilan
+    // topadi va saqlaydi. Shu tufayli "Raqiblar" sahifasi bo'sh qolmaydi.
+    const stillEmpty = await Competitor.countDocuments({ ownerHotelId: myHotel._id, isActive: true });
+    if (stillEmpty === 0 && shouldTryScraperDiscovery(myHotel._id)) {
+      await discoverCompetitorsViaScraper(myHotel).catch((e) =>
+        console.warn('[competitors] skreyper fallback xato:', e.message));
     }
 
     // ── Faqat eng yaqin 5 auto-raqib qoladi ──────────────────────────────
@@ -1296,15 +1449,29 @@ export async function addCompetitor(req, res, next) {
     const myHotel = req.hotel;
     if (!myHotel) return res.status(404).json({ error: 'Avval hotel yarating' });
     const data = req.body;
+
+    // Koordinata berilmagan bo'lsa (masalan skreyper natijasidan — typeahead tez
+    // bo'lishi uchun geocode qilinmagan), shu yerda nom+manzil bo'yicha to'ldiramiz.
+    let lat = data.lat, lng = data.lng;
+    if (!(lat && lng)) {
+      try {
+        const { scraperEnabled, geocodeHotel } = await import('../services/hotelScraper.service.js');
+        if (scraperEnabled()) {
+          const geo = await geocodeHotel({ name: data.name, address: data.address, city: myHotel.city });
+          if (geo) { lat = geo.lat; lng = geo.lng; }
+        }
+      } catch { /* geocode ixtiyoriy */ }
+    }
+
     const competitor = await Competitor.create({
       ownerHotelId: myHotel._id,
       name: data.name, address: data.address || '',
       googlePlaceId: data.googlePlaceId || data.osmId || stablePlaceKey(data),
       osmId: data.osmId || '',
       stars: data.stars || 0, rating: data.rating || 0,
-      location: data.lat && data.lng ? { type: 'Point', coordinates: [data.lng, data.lat] } : undefined,
-      distanceKm: data.lat && data.lng && myHotel.location?.coordinates
-        ? haversine(myHotel.location.coordinates[1], myHotel.location.coordinates[0], data.lat, data.lng) : 0,
+      location: lat && lng ? { type: 'Point', coordinates: [lng, lat] } : undefined,
+      distanceKm: lat && lng && myHotel.location?.coordinates
+        ? haversine(myHotel.location.coordinates[1], myHotel.location.coordinates[0], lat, lng) : 0,
       autoAdded: false,
     });
     res.status(201).json({ competitor });
@@ -1346,44 +1513,66 @@ export async function fetchCompetitorPrice(req, res, next) {
     });
     if (!competitor) return res.status(404).json({ error: 'Raqib topilmadi' });
 
-    if (!hasSerpApi()) {
-      return res.status(503).json({ error: 'SERPAPI_API_KEY sozlanmagan' });
+    let otaPrices = [];
+    let meta = { lowestPrice: 0 };
+    let provider = 'serpapi';
+
+    // 1) SerpAPI (kalit bo'lsa) — bitta so'rovda barcha OTA.
+    if (hasSerpApi()) {
+      const data = await getSerpApiHotelData({
+        name: competitor.name,
+        city: myHotel.city,
+        countryCode: myHotel.countryCode,
+      });
+      otaPrices = (data?.otaPrices || [])
+        .filter((o) => o.source && o.price > 0)
+        .map((o) => ({ source: o.source, price: o.price, currency: o.currency || 'USD', priceType: o.priceType, link: o.link, official: o.official }));
+      meta = { lowestPrice: data?.lowestPrice || 0, stars: data?.hotelClass, rating: data?.rating, reviewCount: data?.reviewCount, image: data?.image };
     }
 
-    const data = await getSerpApiHotelData({
-      name: competitor.name,
-      city: myHotel.city,
-      countryCode: myHotel.countryCode,
-    });
+    // 2) SerpAPI yo'q yoki topmadi — GOOGLE HOTELS (Booking/Agoda/Expedia/Hotels.com/
+    //    Trip.com/Priceline) + Ostrovok. Pullik kalitsiz ham real narx topadi.
+    if (!otaPrices.length) {
+      try {
+        const { scraperEnabled, scraperAllChannelPrices } = await import('../services/hotelScraper.service.js');
+        if (scraperEnabled()) {
+          const gh = await scraperAllChannelPrices(competitor.name, myHotel.city);
+          otaPrices = (gh?.offers || [])
+            .filter((o) => o.price > 0)
+            .map((o) => ({ source: o.source, price: o.price, currency: 'USD' }));
+          if (gh?.rating) meta.rating = meta.rating || gh.rating;
+          if (gh?.reviews) meta.reviewCount = meta.reviewCount || gh.reviews;
+          provider = 'google_scraper';
+        }
+      } catch (e) { console.warn('[competitor] google narx xato:', e.message); }
+    }
+
+    // Hech qaysi manbadan narx topilmadi — 422 + suggestRemove (frontend "narxi
+    // yo'q, o'chirib tashlang" deb taklif qilishi mumkin).
+    if (!otaPrices.length) {
+      competitor.lastPriceFetchedAt = new Date();
+      await competitor.save();
+      return res.status(422).json({
+        error: `"${competitor.name}" uchun hech qaysi kanaldan (Booking/Agoda/Google Hotels) narx topilmadi`,
+        hint: 'no_data',
+        suggestRemove: true,
+      });
+    }
 
     // latestPrices Map'iga barcha kanallarni yozish
     if (!(competitor.latestPrices instanceof Map)) {
       competitor.latestPrices = new Map(Object.entries(competitor.latestPrices || {}));
     }
-    const otaPrices = (data?.otaPrices || []).filter((o) => o.source && o.price > 0);
-
-    // SerpAPI hech narsa qaytarmasa — 422.
-    if (!otaPrices.length && !(data?.lowestPrice > 0)) {
-      competitor.lastPriceFetchedAt = new Date();
-      await competitor.save();
-      return res.status(422).json({
-        error: 'SerpAPI Google Hotels\'da bu raqib uchun narx topilmadi',
-        hint: 'no_data',
-      });
-    }
     for (const ota of otaPrices) {
       const key = ota.source.toLowerCase().replace(/[^a-z0-9]/g, '');
       competitor.latestPrices.set(key, ota.price);
     }
-    // Google "lowest" narxi ham saqlanadi (SerpAPI bo'lganda)
-    if (data?.lowestPrice > 0) {
-      competitor.latestPrices.set('google', data.lowestPrice);
-    }
+    if (meta.lowestPrice > 0) competitor.latestPrices.set('google', meta.lowestPrice);
 
-    if (!competitor.stars && data?.hotelClass) competitor.stars = data.hotelClass;
-    if (!competitor.rating && data?.rating) competitor.rating = data.rating;
-    if (!competitor.reviewCount && data?.reviewCount) competitor.reviewCount = data.reviewCount;
-    if (!competitor.photoUrl && data?.image) competitor.photoUrl = data.image;
+    if (!competitor.stars && meta.stars) competitor.stars = meta.stars;
+    if (!competitor.rating && meta.rating) competitor.rating = meta.rating;
+    if (!competitor.reviewCount && meta.reviewCount) competitor.reviewCount = meta.reviewCount;
+    if (!competitor.photoUrl && meta.image) competitor.photoUrl = meta.image;
 
     competitor.lastPriceFetchedAt = new Date();
     await competitor.save();
@@ -1393,21 +1582,22 @@ export async function fetchCompetitorPrice(req, res, next) {
     checkIn.setDate(checkIn.getDate() + 7);
     const checkOut = new Date(checkIn);
     checkOut.setDate(checkOut.getDate() + 1);
+    const snapSource = provider === 'serpapi' ? 'serpapi' : 'google_scraper';
     try {
       for (const ota of otaPrices) {
         await PriceSnapshot.create({
           targetType: 'competitor', targetId: competitor._id,
           ownerHotelId: myHotel._id, ota: ota.source,
           price: ota.price, currency: ota.currency || 'USD',
-          checkIn, checkOut, source: ota.via === 'apify' ? 'apify' : 'serpapi',
+          checkIn, checkOut, source: snapSource,
           raw: { priceType: ota.priceType, link: ota.link, official: ota.official },
         }).catch(() => {});
       }
-      if (data?.lowestPrice > 0) {
+      if (meta.lowestPrice > 0) {
         await PriceSnapshot.create({
           targetType: 'competitor', targetId: competitor._id,
           ownerHotelId: myHotel._id, ota: 'google',
-          price: data.lowestPrice, currency: 'USD',
+          price: meta.lowestPrice, currency: 'USD',
           checkIn, checkOut, source: 'serpapi',
           raw: { rating: competitor.rating || 0 },
         }).catch(() => {});
@@ -1416,8 +1606,8 @@ export async function fetchCompetitorPrice(req, res, next) {
 
     res.json({
       _id: competitor._id,
-      provider: 'serpapi',
-      googlePrice: data?.lowestPrice || 0,
+      provider,
+      googlePrice: meta.lowestPrice || 0,
       otaPrices,
       stars: competitor.stars,
       rating: competitor.rating,
