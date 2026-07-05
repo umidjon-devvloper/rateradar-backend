@@ -63,6 +63,10 @@ export async function getPriceRecommendations({
   reviewCount = 0,
   stars = 0,
   hotelServiceConnected = false,
+  categoryScores = null,
+  otaChannels = [],
+  roomTypes = [],
+  reviewsDigest = [],
   lang = 'uz',
 }) {
   const langName = lang === 'uz' ? "o'zbek" : lang === 'ru' ? 'rus' : 'ingliz';
@@ -70,7 +74,19 @@ export async function getPriceRecommendations({
     ? competitors.map((c, i) => `${i + 1}. ${c.name} — $${c.price} (${c.stars}★, ${c.distanceKm}km)`).join('\n')
     : 'Ma\'lumot yo\'q';
 
-  const prompt = `Sen hotel revenue manager va mehmonxona biznesi maslahatchisisan. Ma'lumotga qarab 3-5 ta amaliy tavsiya ber.
+  // ── Barcha sahifalar konteksti (holistik maslahat uchun) ───────────
+  const catText = categoryScores && Object.keys(categoryScores).length
+    ? Object.entries(categoryScores).map(([k, v]) => `${k}: ${v}`).join(', ')
+    : 'Yo\'q';
+  const otaText = otaChannels.length ? otaChannels.join(', ') : 'Yo\'q';
+  const roomText = roomTypes.length
+    ? roomTypes.map((r) => `- ${r.name}: $${r.price} (${r.guests} kishi)`).join('\n')
+    : 'Yo\'q';
+  const reviewText = reviewsDigest.length
+    ? reviewsDigest.map((r) => `[${r.rating}★ ${r.sentiment || ''}] ${r.text}`).join('\n')
+    : 'Yo\'q';
+
+  const prompt = `Sen hotel revenue manager va mehmonxona biznesi maslahatchisisan. Mehmonxonaning BARCHA ma'lumotiga (narx, raqiblar, kategoriya reytinglari, OTA kanallar, xona narxlari, sharhlar) qarab 3-5 ta amaliy tavsiya ber.
 
 Mening hotel: ${myHotel}
 Mening narx: $${myPrice}
@@ -79,11 +95,22 @@ Yulduz: ${stars}★ | Reyting: ${rating} (${reviewCount} sharh)
 Raqiblar:
 ${compList}
 
+Kategoriya reytinglari (Booking subscore, 10 balli): ${catText}
+Faol OTA kanallar: ${otaText}
+Xona turlari va narxlari:
+${roomText}
+Oxirgi sharhlar (mazmuni):
+${reviewText}
+
 Mehmonxona-xizmati moduli (RateRadar Hotel Service — mehmonlar QR orqali xizmat buyuradi, so'rovlar xodimlarga Telegram'da boradi) holati: ${hotelServiceConnected ? 'ULANGAN' : 'ULANMAGAN'}
 
-Tavsiyalar quyidagilarni qamrab olsin:
+Tavsiyalar quyidagilarni qamrab olsin (faqat narx emas — BARCHA sahifadan):
 - Narx optimizatsiyasi (raqiblar va bozorga nisbatan) — currentPrice/suggestedPrice bilan.
-- Qo'shimcha daromad: qo'shimcha xizmatlar/upsell (transfer, nonushta, kech chiqish, ekskursiya va h.k.) — reyting va bozorga mos.
+- Kategoriya reytinglari: ENG PAST subscore'ni (masalan tozalik yoki xizmat) aniqlab, uni yaxshilashga aniq maslahat.
+- OTA kanallar qamrovi: kam kanaldasiz yoki muhim kanal (Booking/Agoda/Expedia) yo'q bo'lsa — qo'shishni tavsiya qil.
+- Xona narxlari: xona turlariga qarab narx/upsell strategiyasi.
+- Sharhlardagi TAKRORIY shikoyatlarni aniqlab, ularni bartaraf etishga amaliy maslahat.
+- Qo'shimcha daromad: upsell (transfer, nonushta, kech chiqish, ekskursiya) — reyting va bozorga mos.
 ${hotelServiceConnected
   ? '- Mehmonxona-xizmati ULANGAN: undan qanday yaxshiroq foydalanishni tavsiya qil.'
   : '- Mehmonxona-xizmati ULANMAGAN bo\'lgani uchun ALBATTA bitta tavsiya mehmonxona-xizmati modulini ulashga oid bo\'lsin (mehmon tajribasi va daromadni oshiradi). O\'sha tavsiyaning "action" maydonini "connect_hotel_service" qilib belgila.'}

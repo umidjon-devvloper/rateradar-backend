@@ -65,6 +65,38 @@ export async function aiPriceRecommendations(req, res, next) {
 
     const lang = req.query.lang || "uz";
 
+    // ── BARCHA SAHIFALAR ma'lumoti — holistik (butun boshli) AI maslahat uchun.
+    // Kategoriya reytinglari (Reyting xaritasi sahifasi), OTA kanallar (OTA
+    // Kanallar), xona narxlari (Rate/Room Shopper), sharhlar (Sharhlar sahifasi).
+    const categoryScores =
+      hotel.categoryRatings?.scores && Object.keys(hotel.categoryRatings.scores).length
+        ? hotel.categoryRatings.scores
+        : null;
+    const otaChannels = Array.isArray(hotel.otaChannels) ? hotel.otaChannels : [];
+    const roomTypes = (hotel.roomTypes || []).map((r) => ({
+      name: r.name,
+      price: r.basePrice || 0,
+      guests: r.guests || 2,
+    }));
+
+    // Oxirgi sharhlar (o'z hotel) — takroriy shikoyat/maqtov mavzulari uchun.
+    let reviewsDigest = [];
+    try {
+      const recent = await Review.find({ ownerHotelId: hotel._id, targetType: "own" })
+        .sort({ publishedAt: -1 })
+        .limit(15)
+        .lean();
+      reviewsDigest = recent
+        .map((r) => ({
+          rating: r.rating,
+          sentiment: r.sentiment,
+          text: (r.text || "").slice(0, 160),
+        }))
+        .filter((r) => r.text);
+    } catch {
+      /* sharh bo'lmasa — bo'sh */
+    }
+
     const result = await getPriceRecommendations({
       myHotel: hotel.name,
       myPrice: hotel.currentPrice || 0,
@@ -74,6 +106,10 @@ export async function aiPriceRecommendations(req, res, next) {
       reviewCount: hotel.reviewCount || 0,
       stars: hotel.stars || 0,
       hotelServiceConnected,
+      categoryScores,
+      otaChannels,
+      roomTypes,
+      reviewsDigest,
       lang,
     });
 
