@@ -61,6 +61,9 @@ const hotelSchema = new mongoose.Schema(
     reviewCount: { type: Number, default: 0 },
     currentPrice: { type: Number, default: 0 },
     currency: { type: String, default: 'USD' },
+    // Oxirgi "barcha kanallar" narx yangilanishi vaqti — frontend Dashboard'ga
+    // kirganda ma'lumot eskirgan bo'lsa (masalan 6 soat) avto-yangilash uchun.
+    lastPriceRefreshedAt: { type: Date, default: null },
     // Booking.com kategoriya subscore'lari (HasData Place API) — keshlanadi.
     // Shakl: { overall: Number, scores: { Location, Cleanliness, Staff, ... } }
     categoryRatings: { type: Object, default: null },

@@ -1053,12 +1053,16 @@ export async function refreshAllChannels(req, res, next) {
     summary.competitors.total = competitors.length;
     emitProgress({ stage: 'competitors', status: 'start', total: competitors.length });
 
-    let compIndex = 0;
-    for (const comp of competitors) {
-      compIndex += 1;
+    // Raqiblarni PARALLEL qayta ishlaymiz — ilgari ketma-ket edi (20 raqib × ~20s
+    // ≈ bir necha daqiqa modal). Bir vaqtda REFRESH_COMPETITOR_CONCURRENCY tadan
+    // (default 5). Skreyper mikroservisi o'zida SCRAPE_CONCURRENCY bilan cheklagani
+    // uchun bu bosim OOM qilmaydi — ortiqcha so'rov skreyperda navbatga turadi.
+    const CONCURRENCY = Math.max(1, Number(process.env.REFRESH_COMPETITOR_CONCURRENCY) || 5);
+
+    const processCompetitor = async (comp) => {
       emitProgress({
         stage: 'competitor', name: comp.name,
-        index: compIndex, total: competitors.length, status: 'processing',
+        total: competitors.length, status: 'processing',
       });
       try {
         const data = useSerp
@@ -1118,9 +1122,9 @@ export async function refreshAllChannels(req, res, next) {
           summary.competitors.items.push({ name: comp.name, matched: false });
           emitProgress({
             stage: 'competitor', name: comp.name,
-            index: compIndex, total: competitors.length, status: 'failed',
+            total: competitors.length, status: 'failed',
           });
-          continue;
+          return;
         }
 
         // latestPrices Map yangilash
@@ -1163,7 +1167,7 @@ export async function refreshAllChannels(req, res, next) {
         });
         emitProgress({
           stage: 'competitor', name: comp.name,
-          index: compIndex, total: competitors.length, status: 'done',
+          total: competitors.length, status: 'done',
           channels: otaPrices.length, lowest: compLowest,
           via: viaFallback ? 'fallback' : 'serpapi',
         });
@@ -1172,10 +1176,29 @@ export async function refreshAllChannels(req, res, next) {
         summary.competitors.items.push({ name: comp.name, matched: false, error: err.message });
         emitProgress({
           stage: 'competitor', name: comp.name,
-          index: compIndex, total: competitors.length, status: 'failed',
+          total: competitors.length, status: 'failed',
         });
       }
-    }
+    };
+
+    // Worker-pool: CONCURRENCY ta ishchi umumiy navbatdan raqib olib boradi.
+    // Shu bilan bir vaqtda ko'pi bilan CONCURRENCY ta raqib qayta ishlanadi
+    // (progress socket orqali kelib turadi — modal jonli to'ladi).
+    let _cursor = 0;
+    const _workers = Array.from(
+      { length: Math.min(CONCURRENCY, competitors.length) },
+      async () => {
+        while (_cursor < competitors.length) {
+          const comp = competitors[_cursor++];
+          await processCompetitor(comp);
+        }
+      },
+    );
+    await Promise.all(_workers);
+
+    // Oxirgi yangilanish vaqtini belgilaymiz — Dashboard avto-refresh guardi shuni
+    // o'qiydi (eskirgan bo'lsagina qayta yangilaydi, har kirganda emas).
+    await Hotel.updateOne({ _id: hotel._id }, { $set: { lastPriceRefreshedAt: new Date() } }).catch(() => {});
 
     emitProgress({ stage: 'complete', summary });
     res.json(summary);
