@@ -55,11 +55,31 @@ async function runCollect(hotelId, userId, { lat, lng }) {
     );
 
     // ── 2. Sharhlar (barcha kanal: Google/Apify/Yandex/TripAdvisor) ──
-    await setProgress(hotelId, userId, { step: 'reviews', pct: 85, label: 'Sharhlar yig\'ilmoqda' });
+    await setProgress(hotelId, userId, { step: 'reviews', pct: 70, label: 'Sharhlar yig\'ilmoqda' });
     const { collectReviewsForHotel } = await import('./reviewMonitor.service.js');
     await collectReviewsForHotel(hotel).catch((e) =>
       console.warn(`[collect] sharh: ${e.message}`),
     );
+
+    // ── 3. Xona turlari (Rate Shopper) — Booking property sahifasidan ──
+    // Onboarding'da Rate Shopper ham to'lsin (foydalanuvchi alohida bosmasin).
+    await setProgress(hotelId, userId, { step: 'rooms', pct: 90, label: 'Xona narxlari yig\'ilmoqda' });
+    try {
+      const { scraperEnabled, scraperRooms } = await import('./hotelScraper.service.js');
+      if (scraperEnabled()) {
+        const sr = await scraperRooms(hotel.name, hotel.city);
+        if (sr.rooms?.length) {
+          const roomTypes = sr.rooms.slice(0, 8).map((r) => ({
+            name: r.name, guests: r.guests, sqm: 0, description: '', basePrice: r.price,
+          }));
+          const upd = { roomTypes };
+          if (sr.minPrice > 0) { upd.currentPrice = sr.minPrice; upd.currency = sr.currency || 'USD'; }
+          await Hotel.updateOne({ _id: hotelId }, { $set: upd }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn(`[collect] xona: ${e.message}`);
+    }
 
     // ── Tayyor ───────────────────────────────────────────────────────
     await Hotel.updateOne(

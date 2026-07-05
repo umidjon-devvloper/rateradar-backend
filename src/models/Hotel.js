@@ -64,6 +64,9 @@ const hotelSchema = new mongoose.Schema(
     // Oxirgi "barcha kanallar" narx yangilanishi vaqti — frontend Dashboard'ga
     // kirganda ma'lumot eskirgan bo'lsa (masalan 6 soat) avto-yangilash uchun.
     lastPriceRefreshedAt: { type: Date, default: null },
+    // Foydalanuvchi O'CHIRGAN raqiblar (nameSlug ro'yxati) — auto-discovery
+    // ularni qayta qo'shmasligi uchun (aks holda o'chirgan raqib qaytib keladi).
+    dismissedCompetitors: { type: [String], default: [] },
     // Booking.com kategoriya subscore'lari (HasData Place API) — keshlanadi.
     // Shakl: { overall: Number, scores: { Location, Cleanliness, Staff, ... } }
     categoryRatings: { type: Object, default: null },

@@ -20,6 +20,32 @@ export async function findCities(req, res, next) {
   } catch (err) { next(err); }
 }
 
+// Google Hotels/Booking JONLI SKREYPER orqali shahar hotellari — Places/OSM
+// hech narsa topmaganda fallback. Natija hotelScraper.service ichida 30 daqiqa
+// keshlanadi, shuning uchun bir shahar uchun takror chaqiruv tez. Koordinata
+// bermaydi (hotel tanlanganda geocode bilan to'ldiriladi).
+async function scraperCityHotels(city) {
+  if (!city) return [];
+  try {
+    const { scraperEnabled, scraperDiscoverCity } = await import('../services/hotelScraper.service.js');
+    if (!scraperEnabled()) return [];
+    const found = await scraperDiscoverCity(city, '', 10);
+    return (found || []).map((h) => ({
+      placeId: '',
+      name: h.name,
+      address: h.address || city,
+      lat: undefined,
+      lng: undefined,
+      rating: h.rating || 0,
+      stars: h.stars || 0,
+      reviews: h.reviews || 0,
+      source: 'scraper',
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function findHotels(req, res, next) {
   try {
     const { q = '', country = '', city = '', lat, lng, direct } = req.query;
@@ -33,7 +59,8 @@ export async function findHotels(req, res, next) {
     // Keshlangan shahar ro'yxatida yo'q hotelni ham topadi.
     if (isDirect) {
       if (!q || q.trim().length < 2) return res.json({ hotels: [] });
-      const hotels = await searchHotels(q, country, cityContext);
+      let hotels = await searchHotels(q, country, cityContext);
+      if (!hotels.length) hotels = await scraperCityHotels(city); // scraper fallback
       return res.json({ hotels, count: hotels.length });
     }
 
@@ -43,12 +70,18 @@ export async function findHotels(req, res, next) {
       let hotels = await listCityHotels(cityContext);
       const qn = normalize(q || '');
       if (qn) hotels = hotels.filter((h) => normalize(h.name).includes(qn));
+      // Places/OSM shu shahar uchun hech narsa bermasa — scraper bilan to'ldiramiz.
+      if (!hotels.length) {
+        const sc = await scraperCityHotels(city);
+        hotels = qn ? sc.filter((h) => normalize(h.name).includes(qn)) : sc;
+      }
       return res.json({ hotels, count: hotels.length });
     }
 
     // Koordinatasiz — eski nom bo'yicha qidiruv (fallback)
     if (!q || q.length < 2) return res.json({ hotels: [] });
-    const hotels = await searchHotels(q, country, cityContext);
+    let hotels = await searchHotels(q, country, cityContext);
+    if (!hotels.length) hotels = await scraperCityHotels(city); // scraper fallback
     res.json({ hotels, count: hotels.length });
   } catch (err) { next(err); }
 }

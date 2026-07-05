@@ -1271,7 +1271,10 @@ export async function autoFindCompetitors(hotelId, lat, lng) {
   const myHotel = await Hotel.findById(hotelId);
   if (!myHotel) return;
 
-  const filtered = nearby.filter((h) => h.name && h.name !== myHotel.name);
+  const dismissed = new Set(myHotel.dismissedCompetitors || []);
+  const filtered = nearby.filter(
+    (h) => h.name && h.name !== myHotel.name && !dismissed.has(nameSlug(h.name)),
+  );
 
   // Faqat masofa bo'yicha — eng yaqin mehmonxonalarni oldinga.
   // Radius ichidagilarni aniq masofa bo'yicha kesib, eng yaqin LIMIT tasini olamiz.
@@ -1316,7 +1319,25 @@ async function discoverCompetitorsViaScraper(hotel) {
   const found = await scraperDiscoverCity(hotel.city, hotel.name, AUTO_DISCOVERY_LIMIT).catch(() => []);
   if (!found.length) return [];
 
-  const docs = found.map((h) => ({
+  // Foydalanuvchi o'chirgan raqiblarni qayta qo'shmaymiz.
+  const dismissed = new Set(hotel.dismissedCompetitors || []);
+  const fresh = found.filter((h) => h.name && !dismissed.has(nameSlug(h.name)));
+  if (!fresh.length) return [];
+
+  // Scraper (Google Hotels/Booking) koordinata bermaydi — xaritada ko'rinishi
+  // uchun geocode bilan to'ldiramiz (nom + shahar bo'yicha). Parallel, ixtiyoriy.
+  try {
+    const { geocodeHotel } = await import('../services/hotelScraper.service.js');
+    await Promise.all(
+      fresh.map(async (h) => {
+        if (Number(h.lat) && Number(h.lng)) return; // allaqachon bor
+        const geo = await geocodeHotel({ name: h.name, city: hotel.city }).catch(() => null);
+        if (geo) { h.lat = geo.lat; h.lng = geo.lng; }
+      }),
+    );
+  } catch { /* geocode ixtiyoriy — koordinatasiz ham saqlayveramiz */ }
+
+  const docs = fresh.map((h) => ({
     ownerHotelId: hotel._id,
     name: h.name,
     address: h.address || hotel.city,
@@ -1491,6 +1512,14 @@ export async function deleteCompetitor(req, res, next) {
     if (!myHotel) return res.status(404).json({ error: 'Hotel topilmadi' });
     const result = await Competitor.findOneAndDelete({ _id: req.params.id, ownerHotelId: myHotel._id });
     if (!result) return res.status(404).json({ error: 'Raqib topilmadi' });
+    // O'chirilgan raqibni "dismissed"ga qo'shamiz — aks holda auto-discovery uni
+    // keyingi sahifa yuklanishida qayta topib qo'shib qo'yadi (o'chmagandek).
+    if (result.name) {
+      await Hotel.updateOne(
+        { _id: myHotel._id },
+        { $addToSet: { dismissedCompetitors: nameSlug(result.name) } },
+      ).catch(() => {});
+    }
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
