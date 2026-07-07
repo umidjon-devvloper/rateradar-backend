@@ -100,6 +100,59 @@ export async function toggleUserActive(req, res, next) {
   }
 }
 
+/**
+ * PATCH /admin/users/:id/grant   { days }
+ * Foydalanuvchiga QO'LDA Pro dostup berish — hamkor / demo / o'z hisoblar
+ * uchun (masalan thehotelsass@gmail.com, Dendi Plaza). To'lovsiz faollashadi.
+ *   days: 30 (1 oy) | 365 (1 yil) | 0 (DOIMIY — muddatsiz)
+ * Doimiy = planExpiresAt null: frontend isPlanActive buni faol deb hisoblaydi.
+ */
+export async function grantUserPlan(req, res, next) {
+  try {
+    const days = Number(req.body?.days ?? 30);
+    if (Number.isNaN(days) || days < 0 || days > 3650) {
+      return res.status(400).json({ error: "days 0–3650 oralig'ida bo'lishi kerak (0 = doimiy)" });
+    }
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: "Topilmadi" });
+
+    user.plan = "pro";
+    if (days > 0) {
+      // Faol obuna ustiga qo'shiladi; tugagan bo'lsa bugundan boshlanadi.
+      const base =
+        user.planExpiresAt && user.planExpiresAt > new Date()
+          ? new Date(user.planExpiresAt)
+          : new Date();
+      base.setDate(base.getDate() + days);
+      user.planExpiresAt = base;
+    } else {
+      user.planExpiresAt = null; // doimiy dostup
+    }
+    await user.save();
+    res.json({ user, granted: days === 0 ? "forever" : `${days}d` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * PATCH /admin/users/:id/revoke
+ * Qo'lda berilgan dostupni bekor qilish — foydalanuvchi free'ga qaytadi
+ * (paywall yana yoqiladi).
+ */
+export async function revokeUserPlan(req, res, next) {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: "Topilmadi" });
+    user.plan = "free";
+    user.planExpiresAt = null;
+    await user.save();
+    res.json({ user });
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getApiStats(req, res, next) {
   try {
     const ym = new Date().toISOString().slice(0, 7);

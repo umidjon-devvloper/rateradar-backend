@@ -4,7 +4,9 @@
  * Narxlar O'ZBEK SO'MIDA (UZS). ATMOS API summani TIYINDA qabul qiladi
  * (1 so'm = 100 tiyin), shuning uchun amountTiyin = priceUzs * 100.
  *
- * HOZIRGI SIYOSAT: bitta sotib olinadigan reja — `pro` ($49 ≈ 590 000 so'm/oy).
+ * HOZIRGI SIYOSAT: ikkita sotib olinadigan variant — `pro` (oylik, $49 ≈
+ * 590 000 so'm) va `pro_yearly` (yillik, $490 ≈ 5 900 000 so'm — 10 oy narxi,
+ * 2 oy bepul). Ikkalasi ham foydalanuvchiga `pro` planini beradi (userPlan).
  * `starter` legacy (eski to'lov yozuvlari uchun enumda qoladi, sotilmaydi).
  * `free` faqat ichki holat — ro'yxatdan o'tgan, hali to'lamagan foydalanuvchi.
  */
@@ -33,6 +35,16 @@ export const PLANS = {
     priceUsd: 49,
     durationDays: 30,
     purchasable: true,
+    userPlan: 'pro',
+  },
+  pro_yearly: {
+    id: 'pro_yearly',
+    name: 'Pro — 1 yil',
+    priceUzs: 5_900_000, // $490 — 10 oy narxi (2 oy bepul)
+    priceUsd: 490,
+    durationDays: 365,
+    purchasable: true,
+    userPlan: 'pro', // User.plan'da 'pro' bo'lib turadi, faqat muddati 1 yil
   },
 };
 

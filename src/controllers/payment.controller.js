@@ -387,7 +387,9 @@ async function activateSubscription(userId, plan) {
     user.planExpiresAt && user.planExpiresAt > new Date() ? new Date(user.planExpiresAt) : new Date();
   base.setDate(base.getDate() + (cfg.durationDays || 30));
 
-  user.plan = plan;
+  // pro_yearly kabi variantlar ham User.plan'da 'pro' bo'lib saqlanadi
+  // (User enumini kengaytirmaslik uchun) — farqi faqat muddatda.
+  user.plan = cfg.userPlan || plan;
   user.planExpiresAt = base;
   await user.save();
 }

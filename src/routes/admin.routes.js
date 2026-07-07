@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   getDashboard, listUsers, getUserDetail, toggleUserActive,
   getApiStats, recentActivity, activeUsers, sendBroadcast, listTransactions,
+  grantUserPlan, revokeUserPlan,
 } from '../controllers/admin.controller.js';
 import { requireAuth, requireAdmin } from '../middleware/auth.js';
 
@@ -91,6 +92,47 @@ router.get('/users/:id', getUserDetail);
  *       403: { $ref: '#/components/responses/Forbidden' }
  */
 router.patch('/users/:id/toggle', toggleUserActive);
+
+/**
+ * @openapi
+ * /admin/users/{id}/grant:
+ *   patch:
+ *     tags: [Admin]
+ *     summary: Foydalanuvchiga qo'lda Pro dostup berish (30/365 kun yoki 0=doimiy)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               days: { type: number, example: 365, description: "0 = doimiy" }
+ *     responses:
+ *       200: { description: Dostup berildi }
+ *       403: { $ref: '#/components/responses/Forbidden' }
+ */
+router.patch('/users/:id/grant', grantUserPlan);
+
+/**
+ * @openapi
+ * /admin/users/{id}/revoke:
+ *   patch:
+ *     tags: [Admin]
+ *     summary: Qo'lda berilgan dostupni bekor qilish (free'ga qaytarish)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Dostup bekor qilindi }
+ *       403: { $ref: '#/components/responses/Forbidden' }
+ */
+router.patch('/users/:id/revoke', revokeUserPlan);
 
 /**
  * @openapi
