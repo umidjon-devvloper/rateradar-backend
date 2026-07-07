@@ -43,7 +43,7 @@ export const PLANS = {
     priceUzs: 5_900_000, // $490 — 10 oy narxi (2 oy bepul)
     priceUsd: 490,
     durationDays: 365,
-    purchasable: true,
+    purchasable: false, // Yillik to'lov support orqali amalga oshiriladi
     userPlan: 'pro', // User.plan'da 'pro' bo'lib turadi, faqat muddati 1 yil
   },
 };
