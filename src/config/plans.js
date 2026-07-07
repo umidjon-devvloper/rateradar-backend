@@ -4,7 +4,9 @@
  * Narxlar O'ZBEK SO'MIDA (UZS). ATMOS API summani TIYINDA qabul qiladi
  * (1 so'm = 100 tiyin), shuning uchun amountTiyin = priceUzs * 100.
  *
- * `free` reja to'lov talab qilmaydi — faqat `starter` va `pro` sotib olinadi.
+ * HOZIRGI SIYOSAT: bitta sotib olinadigan reja — `pro` ($49 ≈ 590 000 so'm/oy).
+ * `starter` legacy (eski to'lov yozuvlari uchun enumda qoladi, sotilmaydi).
+ * `free` faqat ichki holat — ro'yxatdan o'tgan, hali to'lamagan foydalanuvchi.
  */
 
 export const PLANS = {
@@ -12,20 +14,23 @@ export const PLANS = {
     id: 'free',
     name: 'Free',
     priceUzs: 0,
+    priceUsd: 0,
     durationDays: 0,
     purchasable: false,
   },
   starter: {
     id: 'starter',
     name: 'Starter',
-    priceUzs: 1_000, // TEST: vaqtincha 1000 so'm (ATMOS sinovi uchun). ASLI: 99_000
+    priceUzs: 590_000, // legacy — sotilmaydi
+    priceUsd: 49,
     durationDays: 30,
-    purchasable: true,
+    purchasable: false,
   },
   pro: {
     id: 'pro',
     name: 'Pro',
-    priceUzs: 1_000, // TEST: vaqtincha 1000 so'm (ATMOS sinovi uchun). ASLI: 199_000
+    priceUzs: 590_000, // $49 — Humo karta orqali so'mda yechiladi
+    priceUsd: 49,
     durationDays: 30,
     purchasable: true,
   },

@@ -19,14 +19,15 @@ function wrapWithTracking(name, fn) {
 
 // ─── Yagona provider: SerpAPI ────────────────────────────────────────────────
 // https://serpapi.com/
-// Bepul: 100 ta so'rov/oy. Kerakli enginelar:
+// PULLIK obuna sotib olingan — limit .env SERPAPI_MONTHLY_LIMIT bilan
+// belgilanadi (default 5000). Kerakli enginelar:
 //   google_hotels  — hotel narxlari + barcha OTA partnerlari (Booking, Agoda, Hotels.com, Trip.com …)
 //   google         — umumiy qidiruv (narx fallback + hotel ma'lumot)
 //   google_maps    — yaqin-atrofdagi joylar
 //   tripadvisor    — TripAdvisor rating + link
 const serpapi = {
   name: "serpapi",
-  monthlyLimit: 100,
+  monthlyLimit: Number(env.SERPAPI_MONTHLY_LIMIT) || 5000,
   supports: ["google_hotels", "google_search", "google_maps", "tripadvisor"],
   get apiKey() {
     return env.SERPAPI_API_KEY;

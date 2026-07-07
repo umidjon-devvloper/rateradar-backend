@@ -12,7 +12,7 @@ const genAccount = customAlphabet('0123456789', 12);
 
 /**
  * GET /api/payments/plans
- * Sotib olinadigan rejalar ro'yxati (narx so'mda).
+ * Sotib olinadigan rejalar ro'yxati (narx so'mda + USD ko'rsatkich).
  */
 export function listPlans(req, res) {
   res.json({
@@ -20,15 +20,25 @@ export function listPlans(req, res) {
       id: p.id,
       name: p.name,
       priceUzs: p.priceUzs,
+      priceUsd: p.priceUsd,
       durationDays: p.durationDays,
     })),
     atmosReady: atmos.isAtmosConfigured(),
-    // Sandbox uchun qulaylik — frontendda ko'rsatish mumkin.
-    testCard: { pan: '9860090101014364', expiry: '02/28', otp: '111111' },
+    // To'lov usullari holati — frontend "Humo faol, Visa tez orada" ko'rsatadi.
+    methods: { humo: 'active', visa: 'coming_soon' },
+    // Sandbox karta faqat developmentda ko'rsatiladi.
+    ...(env.NODE_ENV !== 'production'
+      ? { testCard: { pan: '9860090101014364', expiry: '02/28', otp: '111111' } }
+      : {}),
   });
 }
 
-const createSchema = z.object({ plan: z.enum(['starter', 'pro']) });
+// Faqat sotib olinadigan reja qabul qilinadi (hozircha bitta — pro).
+const purchasablePlan = z
+  .string()
+  .refine((p) => getPlan(p)?.purchasable, { message: "Bu reja sotib olinmaydi" });
+
+const createSchema = z.object({ plan: purchasablePlan });
 
 /**
  * POST /api/payments/create   { plan }
@@ -73,7 +83,7 @@ export async function createPayment(req, res, next) {
 }
 
 const invoiceSchema = z.object({
-  plan: z.enum(['starter', 'pro']),
+  plan: purchasablePlan,
   successUrl: z.string().url().optional(), // qaytish manzili (frontend origin + /billing)
 });
 

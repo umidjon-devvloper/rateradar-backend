@@ -510,11 +510,12 @@ export async function getHotelXoteloRates(req, res, next) {
 }
 
 /**
- * Bitta raqib uchun Xotelo narxini oladi (kerak bo'lsa TripAdvisor URL'ni
- * DuckDuckGo'dan topadi, kalitni saqlaydi). Eng arzon narxni qaytaradi.
+ * Bitta raqib narxi: SerpAPI (birinchi — pullik obuna, 1 so'rovda barcha OTA)
+ * → Xotelo (bepul, TripAdvisor URL'ni DuckDuckGo'dan topadi, kalitni saqlaydi)
+ * → Booking.com jonli skreyper. Eng arzon narxni qaytaradi.
  * instantSnapshot ichida parallel ishlatiladi.
  */
-async function fetchOneCompetitorXotelo(competitor, city) {
+async function fetchOneCompetitorPrice(competitor, city, countryCode = '') {
   // Yaqinda (< 2 daqiqa) narx olingan bo'lsa — masalan skreyper discovery'da —
   // qayta skreyp/Xotelo qilmaymiz, keshlangan narxni qaytaramiz.
   if (
@@ -524,6 +525,43 @@ async function fetchOneCompetitorXotelo(competitor, city) {
   ) {
     const prices = [...competitor.latestPrices.values()].filter((p) => p > 0);
     if (prices.length) return { best: Math.min(...prices), count: prices.length };
+  }
+
+  // ── SerpAPI birinchi ────────────────────────────────────────────────
+  if (hasSerpApi()) {
+    const serpData = await getSerpApiHotelData({
+      name: competitor.name, city, countryCode,
+    }).catch(() => null);
+    const serpRates = (serpData?.otaPrices || []).filter((o) => {
+      if (!o.source || !(o.price > 0)) return false;
+      const lower = String(o.source).toLowerCase();
+      return lower !== 'google' && lower !== 'google hotels';
+    });
+    if (serpRates.length) {
+      if (!competitor.latestPrices) competitor.latestPrices = new Map();
+      for (const r of serpRates) {
+        const k = r.source.toLowerCase().replace(/[^a-z0-9]/g, '');
+        competitor.latestPrices.set(k, r.price);
+      }
+      if (!competitor.rating && serpData.rating) competitor.rating = serpData.rating;
+      if (!competitor.reviewCount && serpData.reviewCount) competitor.reviewCount = serpData.reviewCount;
+      if (!competitor.photoUrl && serpData.image) competitor.photoUrl = serpData.image;
+      competitor.lastPriceFetchedAt = new Date();
+      await competitor.save().catch(() => {});
+
+      const ci = new Date(); ci.setDate(ci.getDate() + 1);
+      const co = new Date(ci); co.setDate(co.getDate() + 1);
+      for (const r of serpRates) {
+        await PriceSnapshot.create({
+          targetType: 'competitor', targetId: competitor._id, ownerHotelId: competitor.ownerHotelId,
+          ota: r.source, price: r.price, currency: r.currency || serpData.currency || 'USD',
+          checkIn: ci, checkOut: co, source: 'serpapi',
+        }).catch(() => {});
+      }
+
+      const best = Math.min(...serpRates.map((r) => r.price));
+      return { best, count: serpRates.length };
+    }
   }
 
   const { findTripAdvisorUrl, getXoteloRates, extractXoteloHotelKey } =
@@ -601,13 +639,12 @@ async function fetchOneCompetitorXotelo(competitor, city) {
 /**
  * POST /hotels/me/instant-snapshot
  *
- * "Aha moment" — bitta so'rovda, BEPUL Xotelo (TripAdvisor → 8+ OTA) orqali:
- *   1. O'z mehmonxonam narxini oladi (kalit yo'q bo'lsa nom+shahar bo'yicha topadi).
+ * "Aha moment" — bitta so'rovda:
+ *   1. O'z mehmonxonam narxini oladi — SerpAPI birinchi (pullik obuna,
+ *      1 so'rovda barcha OTA), keyin Xotelo (bepul), keyin skreyper.
  *   2. Raqiblar yo'q bo'lsa atrofdagilarni avtomatik topadi.
- *   3. Har bir raqib narxini oladi (parallel).
+ *   3. Har bir raqib narxini oladi (parallel, xuddi shu tartibda).
  *   4. Bozordagi o'rnim, o'rtacha narx, farq va taxminiy yo'qotishni hisoblaydi.
- *
- * Hech qanday pullik API ishlatilmaydi.
  */
 // Qayta ishlatiladigan yadro — HTTP handler ham, onboarding orkestratori ham
 // shu funksiyani chaqiradi (o'z kanallar + raqib topish + raqib narxlari +
@@ -617,9 +654,45 @@ export async function runInstantSnapshot(hotel) {
       await import('../services/xotelo.service.js');
 
     // ── 1. O'Z MEHMONXONAM ─────────────────────────────────────────────
+    // 1a. SerpAPI BIRINCHI — pullik obuna bor: bitta so'rovda barcha OTA
+    //     kanali (Booking, Agoda, Expedia, …) keladi. Xotelo/skreyper faqat
+    //     SerpAPI topmaganda ishlaydi.
+    let ownChannels = [];
+    if (hasSerpApi()) {
+      const serpData = await getSerpApiHotelData({
+        name: hotel.name, city: hotel.city, countryCode: hotel.countryCode,
+        propertyToken: hotel.serpPropertyToken || '',
+      }).catch(() => null);
+      if (serpData?.propertyToken && !hotel.serpPropertyToken) {
+        hotel.serpPropertyToken = serpData.propertyToken;
+        await hotel.save().catch(() => {});
+      }
+      const serpOtas = (serpData?.otaPrices || []).filter((o) => {
+        if (!o.source || !(o.price > 0)) return false;
+        const lower = String(o.source).toLowerCase();
+        return lower !== 'google' && lower !== 'google hotels';
+      });
+      if (serpOtas.length) {
+        ownChannels = serpOtas
+          .map((o) => ({ source: o.source, price: o.price, checkIn: null }))
+          .sort((a, b) => a.price - b.price);
+        // SerpAPI ertaga→indinga so'raydi (serpapi.service dateOffset bilan mos).
+        const ci = new Date(); ci.setDate(ci.getDate() + 1);
+        const co = new Date(ci); co.setDate(co.getDate() + 1);
+        for (const o of serpOtas) {
+          await PriceSnapshot.create({
+            targetType: 'own', targetId: hotel._id, ownerHotelId: hotel._id,
+            ota: o.source, price: o.price, currency: o.currency || serpData.currency || 'USD',
+            checkIn: ci, checkOut: co, source: 'serpapi',
+          }).catch(() => {});
+        }
+      }
+    }
+
     const taUrl = hotel.otaUrls?.TripAdvisor || hotel.tripAdvisorUrl || '';
     let ownKey = hotel.xoteloHotelKey || extractXoteloHotelKey(taUrl);
-    if (!ownKey) {
+    // 1b. Xotelo (bepul) — SerpAPI narx bermagandagina.
+    if (!ownChannels.length && !ownKey) {
       ownKey = await searchXoteloHotel(hotel.name, hotel.city).catch(() => null);
       if (ownKey) {
         hotel.xoteloHotelKey = ownKey;
@@ -627,8 +700,7 @@ export async function runInstantSnapshot(hotel) {
       }
     }
 
-    let ownChannels = [];
-    if (ownKey) {
+    if (!ownChannels.length && ownKey) {
       const data = await getXoteloMergedRates({ hotelKey: ownKey, tripAdvisorUrl: taUrl }).catch(() => null);
       ownChannels = (data?.rates || [])
         .filter((r) => r.price > 0)
@@ -686,7 +758,7 @@ export async function runInstantSnapshot(hotel) {
 
     const targets = competitors.slice(0, AUTO_DISCOVERY_LIMIT);
     const settled = await Promise.allSettled(
-      targets.map((c) => fetchOneCompetitorXotelo(c, hotel.city)),
+      targets.map((c) => fetchOneCompetitorPrice(c, hotel.city, hotel.countryCode)),
     );
     const competitorSummaries = targets.map((c, i) => {
       const r = settled[i];

@@ -4,11 +4,12 @@ import { hasApify, getBookingCitySearchApify, matchHotelByName } from './apify.s
 
 /**
  * Hotel ma'lumotlarini boyitadi:
- * - Narx: Apify Booking.com (shahar qidiruvi + nom mos qilish)
+ * - SerpAPI BIRINCHI (pullik obuna) — narx, reyting, sharh soni, rasm,
+ *   yulduz va barcha OTA narxlari bitta so'rovda.
+ * - Narx fallback: Apify Booking.com (shahar qidiruvi + nom mos qilish)
  * - Rating + photo: Google Places API
  * - Yulduzlar: OSM/Overpass fallback
- *
- * SerpAPI bu yerda ishlatilmaydi — u faqat Google sharhlari uchun (fetchHotelReviews).
+ * - Oxirgi chora: jonli skreyper (Google Hotels + Booking).
  */
 export async function enrichHotelData({ name, city = '', country = '', countryCode = '', lat, lng }) {
   const result = {
@@ -24,8 +25,34 @@ export async function enrichHotelData({ name, city = '', country = '', countryCo
     source: '',
   };
 
-  // 1. Apify Booking — narx
-  if (hasApify() && city) {
+  // 0. SerpAPI — asosiy manba (scraper/Apify'dan OLDIN so'raladi).
+  try {
+    const { hasSerpApi, getSerpApiHotelData } = await import('./serpapi.service.js');
+    if (hasSerpApi()) {
+      const sd = await getSerpApiHotelData({ name, city, countryCode });
+      if (sd) {
+        if (sd.lowestPrice > 0) {
+          result.currentPrice = sd.lowestPrice;
+          result.source = 'serpapi';
+        }
+        if (sd.rating > 0) result.rating = sd.rating;
+        if (sd.reviewCount > 0) result.reviewCount = sd.reviewCount;
+        if (sd.hotelClass > 0) result.stars = sd.hotelClass;
+        if (sd.image) result.photoUrl = sd.image;
+        if (sd.address) result.address = sd.address;
+        if (sd.otaPrices?.length) {
+          result.otaPrices = sd.otaPrices
+            .filter((o) => o.price > 0)
+            .map((o) => ({ source: o.source, price: o.price, via: 'serpapi' }));
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('SerpAPI enrich xato:', err.message);
+  }
+
+  // 1. Apify Booking — narx (SerpAPI topmagan bo'lsa)
+  if (!result.currentPrice && hasApify() && city) {
     try {
       const items = await getBookingCitySearchApify(city, { maxItems: 50 });
       const match = matchHotelByName(items, name, 0.4);

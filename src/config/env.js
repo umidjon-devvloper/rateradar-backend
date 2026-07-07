@@ -20,6 +20,8 @@ const schema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   SERPAPI_API_KEY: z.string().optional(),
+  // SerpAPI oylik so'rov limiti (pullik obunaga mos qiymat qo'ying).
+  SERPAPI_MONTHLY_LIMIT: z.string().default('5000'),
   APIFY_API_KEY: z.string().optional(),
   BOOKING_RAPIDAPI_KEY: z.string().optional(),
   EXPEDIA_RAPIDAPI_KEY: z.string().optional(),
