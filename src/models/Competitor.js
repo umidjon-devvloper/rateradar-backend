@@ -27,6 +27,9 @@ const competitorSchema = new mongoose.Schema(
     // Booking.com property URL — bir marta topilgach saqlanadi, keyingi
     // Apify so'rovlarda qayta SerpAPI qidiruvi qilinmaydi (tannarx tejaladi).
     bookingUrl: { type: String, default: "" },
+    // Kanal URL'lari ({'Booking.com': url, 'Expedia': url, ...}) — foydalanuvchi
+    // xato havolani o'zi tuzata oladi; fetch-channel shu URL'dan aniq narx oladi.
+    otaUrls: { type: Object, default: {} },
     latestPrices: { type: Map, of: Number, default: {} },
     lastPriceFetchedAt: { type: Date, default: null },
     autoAdded: { type: Boolean, default: true },

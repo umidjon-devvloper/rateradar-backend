@@ -19,6 +19,7 @@ import {
 } from '../services/apify.service.js';
 import { hasSerpApi, getSerpApiHotelData } from '../services/serpapi.service.js';
 import { hasHasData, getBookingPriceHasData } from '../services/hasdata.service.js';
+import { normalizeOtaUrls, saveHotelOtaUrl } from '../utils/otaUrls.js';
 import { emitToUser } from '../services/socket.service.js';
 import { TARGET_CHANNELS, fetchChannelFallback } from '../services/channelFallback.service.js';
 
@@ -517,12 +518,8 @@ export async function refreshRoomShopper(req, res, next) {
       bookingUrl = otaUrls['Booking.com'] || null;
       if (!bookingUrl) {
         bookingUrl = await findBookingUrl(hotel.name, hotel.city);
-        if (bookingUrl) {
-          await Hotel.updateOne(
-            { _id: hotel._id },
-            { $set: { 'otaUrls.Booking.com': bookingUrl } }
-          ).catch(() => {});
-        }
+        // Dotted-path $set EMAS — nested {Booking:{com}} buzilishini oldini oladi.
+        if (bookingUrl) await saveHotelOtaUrl(hotel._id, 'Booking.com', bookingUrl).catch(() => {});
       }
       if (bookingUrl) {
         const apify = await getBookingRoomsApify(bookingUrl, { checkIn: ciStr, checkOut: coStr });
@@ -600,18 +597,6 @@ export async function refreshRoomShopper(req, res, next) {
   } catch (err) {
     next(err);
   }
-}
-
-function normalizeOtaUrls(raw) {
-  const src = raw || {};
-  const out = {};
-  for (const [k, v] of Object.entries(src)) {
-    if (typeof v === 'string') out[k] = v;
-    else if (v && typeof v === 'object' && typeof v.com === 'string' && k === 'Booking') {
-      out['Booking.com'] = v.com;
-    }
-  }
-  return out;
 }
 
 // Refresh konfiguratsiyasi har bir Apify kanali uchun:
@@ -717,12 +702,8 @@ export async function refreshChannelPrices(req, res, next) {
 
         if (!url && cfg.finder) {
           url = await cfg.finder(hotel.name, hotel.city);
-          if (url) {
-            await Hotel.updateOne(
-              { _id: hotel._id },
-              { $set: { [`otaUrls.${cfg.urlKey}`]: url } }
-            ).catch(() => {});
-          }
+          // Dotted-path $set EMAS — 'Booking.com'/'Trip.com' kalitlari buziladi.
+          if (url) await saveHotelOtaUrl(hotel._id, cfg.urlKey, url).catch(() => {});
         }
 
         const ownResult = await cfg.own(hotel.name, hotel.city, {

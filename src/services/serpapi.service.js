@@ -191,6 +191,9 @@ export async function getSerpApiHotelData({
           address: d.address || '',
           amenities: d.amenities || [],
           hotelClass: d.hotel_class || d.extracted_hotel_class || 0,
+          // Kategoriya reytinglari — shu javobning o'zida keladi (qo'shimcha
+          // so'rovsiz). getSerpApiCategoryRatings shu maydonni ishlatadi.
+          categoryRatings: parseReviewsBreakdown(d),
         };
       } catch (err) {
         // Bosqich-2 muvaffaqiyatsiz bo'lsa, bosqich-1 ma'lumotini qaytaramiz
@@ -206,6 +209,42 @@ export async function getSerpApiHotelData({
     else console.warn('SerpAPI google_hotels xato:', status || '', err.message);
     return null;
   }
+}
+
+/**
+ * Google Hotels `reviews_breakdown` → 10 ballik kategoriya baholari.
+ * Google har kategoriya bo'yicha eslatmalar sonini beradi (positive/negative/
+ * neutral), rasmiy subscore emas — shuning uchun ballni o'zimiz hisoblaymiz:
+ *   ball = positive / total_mentioned × 10
+ * Umumiy reyting 5 ballik keladi → ×2 (10 ballik shkala, frontend'ga mos).
+ */
+function parseReviewsBreakdown(d) {
+  const rows = Array.isArray(d?.reviews_breakdown) ? d.reviews_breakdown : [];
+  const scores = {};
+  for (const r of rows) {
+    const label = String(r?.name || r?.description || '').trim();
+    const total = Number(r?.total_mentioned) || 0;
+    const positive = Number(r?.positive) || 0;
+    // 3 tadan kam eslatma — statistik ishonchsiz, tashlab yuboramiz.
+    if (!label || total < 3) continue;
+    scores[label] = Math.round((positive / total) * 100) / 10;
+  }
+  if (!Object.keys(scores).length) return null;
+  const overall5 = Number(d?.overall_rating || d?.rating) || 0;
+  return { overall: Math.round(overall5 * 20) / 10, scores };
+}
+
+/**
+ * Kategoriya reytinglari — google_hotels property details'dagi
+ * reviews_breakdown'dan. getSerpApiHotelData bilan bir xil kesh (1 soat):
+ * narx yangilanishi yaqinda o'tgan bo'lsa, qo'shimcha SerpAPI so'rovi ketmaydi.
+ *
+ * @returns {Promise<{overall:number, scores:Record<string,number>, propertyToken:string} | null>}
+ */
+export async function getSerpApiCategoryRatings({ name, city = '', countryCode = '', propertyToken = '' }) {
+  const data = await getSerpApiHotelData({ name, city, countryCode, propertyToken });
+  if (!data?.categoryRatings) return null;
+  return { ...data.categoryRatings, propertyToken: data.propertyToken || '' };
 }
 
 /**

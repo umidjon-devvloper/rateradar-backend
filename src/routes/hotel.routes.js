@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   createHotel, getMyHotel, updateMyHotel, listMyHotels,
   getCompetitors, addCompetitor, deleteCompetitor, fetchCompetitorPrice, fetchCompetitorXoteloPrice, fetchCompetitorHasDataPrice, getCompetitorDetail,
+  updateCompetitorOtaUrls, fetchCompetitorChannel,
   enrichMyHotel, getOtaPrices, getOtaChannels, getOtaChannelDetail, setOtaChannelPrice,
   fetchOtaChannel, fetchAllOtaChannels, findBookingUrlEndpoint,
   getHotelXoteloRates, getMyCategoryRatings,
@@ -191,13 +192,13 @@ router.post('/me/instant-snapshot', instantSnapshot);
  * /hotels/me/category-ratings:
  *   get:
  *     tags: [Hotels]
- *     summary: Mening hotelimning Booking.com kategoriya subscore'lari (keshlanadi)
+ *     summary: Mening hotelimning kategoriya reytinglari — SerpAPI Google Hotels, fallback skreyper (keshlanadi)
  *     parameters:
  *       - $ref: '#/components/parameters/HotelIdHeader'
  *       - in: query
  *         name: refresh
  *         schema: { type: boolean }
- *         description: "true — keshni e'tiborsiz qoldirib qaytadan oladi (1 HasData Place so'rovi)"
+ *         description: "true — keshni e'tiborsiz qoldirib qaytadan oladi (SerpAPI property details so'rovi)"
  *     responses:
  *       200:
  *         description: Kategoriya reytinglari
@@ -215,6 +216,7 @@ router.post('/me/instant-snapshot', instantSnapshot);
  *                     properties:
  *                       label: { type: string, example: Cleanliness }
  *                       value: { type: number, example: 9.8 }
+ *                 source: { type: string, example: Google }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.get('/me/category-ratings', getMyCategoryRatings);
@@ -432,6 +434,60 @@ router.post('/competitors/:id/fetch-xotelo', fetchCompetitorXoteloPrice);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/competitors/:id/fetch-hasdata', fetchCompetitorHasDataPrice);
+
+/**
+ * @openapi
+ * /hotels/competitors/{id}/ota-urls:
+ *   put:
+ *     tags: [Hotels]
+ *     summary: Raqib kanal havolalarini saqlash (xato havolani qo'lda tuzatish)
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               otaUrls:
+ *                 type: object
+ *                 example: { "Booking.com": "https://www.booking.com/hotel/uz/x.html" }
+ *     responses:
+ *       200: { description: Yangilangan raqib }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.put('/competitors/:id/ota-urls', updateCompetitorOtaUrls);
+
+/**
+ * @openapi
+ * /hotels/competitors/{id}/fetch-channel:
+ *   post:
+ *     tags: [Hotels]
+ *     summary: Raqibning tanlangan kanalidan narx olish (saqlangan havoladan, Apify)
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               source: { type: string, enum: [booking, hotels, expedia, trip] }
+ *     responses:
+ *       200: { description: Kanal narxi }
+ *       404: { description: Havola topilmadi }
+ *       503: { description: APIFY_API_KEY sozlanmagan }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.post('/competitors/:id/fetch-channel', fetchCompetitorChannel);
 
 /**
  * @openapi

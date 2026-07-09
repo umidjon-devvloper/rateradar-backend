@@ -4,7 +4,7 @@ import User from '../models/User.js';
 import PriceSnapshot from '../models/PriceSnapshot.js';
 import { searchNearby } from '../services/places.service.js';
 import { enrichHotelData } from '../services/hotelEnrich.service.js';
-import { getSerpApiReviewsForOta, getSerpApiHotelData, hasSerpApi } from '../services/serpapi.service.js';
+import { getSerpApiReviewsForOta, getSerpApiHotelData, getSerpApiCategoryRatings, hasSerpApi } from '../services/serpapi.service.js';
 import {
   hasApify,
   getBookingPriceApify, getHotelsComPriceApify,
@@ -13,6 +13,7 @@ import {
 } from '../services/apify.service.js';
 import { TARGET_CHANNELS, fetchChannelFallback } from '../services/channelFallback.service.js';
 import { startCollect } from '../services/onboardingCollect.service.js';
+import { normalizeOtaUrls, saveHotelOtaUrl } from '../utils/otaUrls.js';
 import { z } from 'zod';
 
 const createHotelSchema = z.object({
@@ -134,6 +135,13 @@ export async function updateMyHotel(req, res, next) {
     const allowed = ['name', 'address', 'stars', 'otaChannels', 'rooms', 'currentPrice', 'currency', 'otaUrls', 'xoteloHotelKey', 'makcorpsHotelId'];
     const update = {};
     for (const k of allowed) if (req.body[k] !== undefined) update[k] = req.body[k];
+
+    // otaUrls kelsa — buzuq nested yozuvlarni ({Booking:{com:url}}) tekislaymiz,
+    // foydalanuvchi yuborgan string qiymatlar ustun turadi (aks holda eski
+    // nested qiymat yangi kiritilgan URL'ni "yutib yuborardi" — saqlanmaslik bug'i).
+    if (update.otaUrls && typeof update.otaUrls === 'object') {
+      update.otaUrls = normalizeOtaUrls(update.otaUrls);
+    }
 
     // Xotelo Hotel Key'ni TripAdvisor URL'dan avtomatik ajratamiz — endi
     // foydalanuvchi key'ni qo'lda kiritmaydi. Faqat key aniq yuborilmaganda.
@@ -325,25 +333,6 @@ export async function findBookingUrlEndpoint(req, res, next) {
     }
     res.json({ url, saved, ota });
   } catch (err) { next(err); }
-}
-
-// Mongo'da `'otaUrls.Booking.com': url` $set qilinsa nested ob'ekt yaratiladi:
-// `{Booking: {com: url}}`. Bunday eski yozuvlarni avtomatik tekislaymiz.
-function normalizeOtaUrls(raw) {
-  const src = raw || {};
-  const out = {};
-  for (const [k, v] of Object.entries(src)) {
-    if (typeof v === 'string') out[k] = v;
-    else if (v && typeof v === 'object' && typeof v.com === 'string' && k === 'Booking') {
-      out['Booking.com'] = v.com;
-    } else if (v && typeof v === 'object') {
-      // boshqa nested holatlar bo'lsa, faqat string maydonlarni olamiz
-      for (const [sk, sv] of Object.entries(v)) {
-        if (typeof sv === 'string') out[`${k}.${sk}`] = sv;
-      }
-    }
-  }
-  return out;
 }
 
 export async function getOtaChannels(req, res, next) {
@@ -809,9 +798,10 @@ export async function instantSnapshot(req, res, next) {
 
 /**
  * GET /hotels/me/category-ratings
- * Mening hotelimning Booking.com kategoriya subscore'lari (Cleanliness,
- * Location, Staff, Comfort, Facilities, Value). HasData Place API'dan olinadi
- * va 14 kun keshlanadi (kredit tejaladi). ?refresh=true — majburiy yangilash.
+ * Mening hotelimning kategoriya reytinglari. Asosiy manba — SerpAPI Google
+ * Hotels (reviews_breakdown'dan hisoblangan 10 ballik ballar), fallback —
+ * jonli skreyper (Booking.com subscore'lari). 14 kun keshlanadi.
+ * ?refresh=true — majburiy yangilash.
  */
 const CATEGORY_FRESH_MS = 14 * 86400_000;
 const CATEGORY_ORDER = ['Location', 'Cleanliness', 'Staff', 'Comfort', 'Facilities', 'Value for money', 'Free Wifi'];
@@ -845,6 +835,7 @@ export async function getMyCategoryRatings(req, res, next) {
         configured: true,
         overall: hotel.categoryRatings.overall || 0,
         categories: categoriesToArray(hotel.categoryRatings.scores),
+        source: hotel.categoryRatings.source || 'Booking.com',
         asOf: hotel.categoryRatingsAt,
         cached: true,
       });
@@ -854,29 +845,31 @@ export async function getMyCategoryRatings(req, res, next) {
       configured: Boolean(cached),
       overall: hotel.categoryRatings?.overall || 0,
       categories: cached ? categoriesToArray(hotel.categoryRatings.scores) : [],
+      source: hotel.categoryRatings?.source || 'Booking.com',
       asOf: hotel.categoryRatingsAt || null,
     });
 
     let data = null;
 
-    // 1) HasData (kalit bo'lsa) — Booking URL bilan.
-    const { getBookingCategoryRatings, hasHasData } = await import('../services/hasdata.service.js');
-    if (hasHasData()) {
-      let bookingUrl = hotel.otaUrls?.['Booking.com'] || hotel.otaUrls?.Booking || '';
-      if (!bookingUrl) {
-        try { bookingUrl = await findBookingUrl(hotel.name, hotel.city); } catch { bookingUrl = ''; }
-        if (bookingUrl) {
-          const nextOtaUrls = { ...(hotel.otaUrls || {}), 'Booking.com': bookingUrl };
-          await Hotel.updateOne({ _id: hotel._id }, { $set: { otaUrls: nextOtaUrls } }).catch(() => {});
+    // 1) SerpAPI (kalit bo'lsa) — Google Hotels reviews_breakdown.
+    if (hasSerpApi()) {
+      try {
+        const sr = await getSerpApiCategoryRatings({
+          name: hotel.name,
+          city: hotel.city,
+          countryCode: hotel.countryCode,
+          propertyToken: hotel.serpPropertyToken || '',
+        });
+        if (sr?.scores && Object.keys(sr.scores).length) {
+          data = { overall: sr.overall, scores: sr.scores, source: 'Google' };
+          if (sr.propertyToken && !hotel.serpPropertyToken) {
+            await Hotel.updateOne({ _id: hotel._id }, { $set: { serpPropertyToken: sr.propertyToken } }).catch(() => {});
+          }
         }
-      }
-      if (bookingUrl) {
-        try { data = await getBookingCategoryRatings({ bookingUrl }); }
-        catch (err) { console.warn('Category ratings (hasdata) xato:', err.message); }
-      }
+      } catch (err) { console.warn('Category ratings (serpapi) xato:', err.message); }
     }
 
-    // 2) JONLI SKREYPER fallback — HasData yo'q yoki natija bermadi. Booking
+    // 2) JONLI SKREYPER fallback — SerpAPI yo'q yoki natija bermadi. Booking
     //    URL'ni o'zi topadi (kalit/sozlama kerak emas).
     if (!data?.scores || !Object.keys(data.scores).length) {
       try {
@@ -884,7 +877,7 @@ export async function getMyCategoryRatings(req, res, next) {
         if (scraperEnabled()) {
           const sc = await scraperCategoryRatings(hotel.name, hotel.city);
           if (sc?.scores && Object.keys(sc.scores).length) {
-            data = { overall: sc.overall, scores: sc.scores };
+            data = { overall: sc.overall, scores: sc.scores, source: 'Booking.com' };
             if (sc.bookingUrl && !(hotel.otaUrls?.['Booking.com'])) {
               const nextOtaUrls = { ...(hotel.otaUrls || {}), 'Booking.com': sc.bookingUrl };
               await Hotel.updateOne({ _id: hotel._id }, { $set: { otaUrls: nextOtaUrls } }).catch(() => {});
@@ -902,13 +895,14 @@ export async function getMyCategoryRatings(req, res, next) {
     const now = new Date();
     await Hotel.updateOne(
       { _id: hotel._id },
-      { $set: { categoryRatings: { overall: data.overall || 0, scores: data.scores }, categoryRatingsAt: now } },
+      { $set: { categoryRatings: { overall: data.overall || 0, scores: data.scores, source: data.source }, categoryRatingsAt: now } },
     ).catch(() => {});
 
     res.json({
       configured: true,
       overall: data.overall || 0,
       categories: categoriesToArray(data.scores),
+      source: data.source,
       asOf: now,
       cached: false,
     });
@@ -1046,6 +1040,15 @@ export async function fetchAllOtaChannels(req, res, next) {
  * Faqat tanlangan kanalga Apify so'rovi yuboradi va PriceSnapshot saqlaydi.
  * Foydalanuvchi har bir kanalni alohida bosib oladi (sahifa kirganda emas).
  */
+// Apify kanal konfiguratsiyasi — own hotel (fetchOtaChannel) va raqiblar
+// (fetchCompetitorChannel) uchun umumiy.
+const APIFY_CHANNEL_SOURCES = {
+  booking: { fn: getBookingPriceApify, urlKey: 'Booking.com', urlArg: 'bookingUrl', finder: findBookingUrl, label: 'Booking.com' },
+  hotels:  { fn: getHotelsComPriceApify, urlKey: 'Hotels.com', urlArg: 'hotelsUrl', finder: null, label: 'Hotels.com' },
+  expedia: { fn: getExpediaPriceApify, urlKey: 'Expedia', urlArg: 'expediaUrl', finder: findExpediaUrl, label: 'Expedia' },
+  trip:    { fn: getTripComPriceApify, urlKey: 'Trip.com', urlArg: 'tripUrl', finder: findTripUrl, label: 'Trip.com' },
+};
+
 export async function fetchOtaChannel(req, res, next) {
   try {
     if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
@@ -1054,14 +1057,7 @@ export async function fetchOtaChannel(req, res, next) {
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
 
     const source = String(req.body?.source || '').toLowerCase();
-
-    const SOURCES = {
-      booking: { fn: getBookingPriceApify, urlKey: 'Booking.com', urlArg: 'bookingUrl', finder: findBookingUrl, label: 'Booking.com' },
-      hotels:  { fn: getHotelsComPriceApify, urlKey: 'Hotels.com', urlArg: 'hotelsUrl', finder: null, label: 'Hotels.com' },
-      expedia: { fn: getExpediaPriceApify, urlKey: 'Expedia', urlArg: 'expediaUrl', finder: findExpediaUrl, label: 'Expedia' },
-      trip:    { fn: getTripComPriceApify, urlKey: 'Trip.com', urlArg: 'tripUrl', finder: findTripUrl, label: 'Trip.com' },
-    };
-    const cfg = SOURCES[source];
+    const cfg = APIFY_CHANNEL_SOURCES[source];
     if (!cfg) return res.status(400).json({ error: `Noma'lum source: ${source}` });
 
     const hotelOtaUrls = normalizeOtaUrls(hotel.otaUrls);
@@ -1070,12 +1066,8 @@ export async function fetchOtaChannel(req, res, next) {
     // URL yo'q bo'lsa — avtomatik topishga harakat qilamiz
     if (!url && cfg.finder) {
       url = await cfg.finder(hotel.name, hotel.city);
-      if (url) {
-        await Hotel.updateOne(
-          { _id: hotel._id },
-          { $set: { [`otaUrls.${cfg.urlKey}`]: url } }
-        ).catch(() => {});
-      }
+      // Dotted-path $set EMAS — 'Booking.com' kaliti nested bo'lib buzilardi.
+      if (url) await saveHotelOtaUrl(hotel._id, cfg.urlKey, url).catch(() => {});
     }
 
     if (!url) {
@@ -1593,6 +1585,113 @@ export async function deleteCompetitor(req, res, next) {
       ).catch(() => {});
     }
     res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+/**
+ * PUT /hotels/competitors/:id/ota-urls
+ * Raqibning kanal havolalarini saqlaydi. Body: { otaUrls: {'Booking.com': url, ...} }
+ * Bo'sh string yuborilsa o'sha kanal havolasi o'chiriladi. Havola xato bo'lsa
+ * foydalanuvchi shu yerdan o'zi tuzatadi.
+ */
+export async function updateCompetitorOtaUrls(req, res, next) {
+  try {
+    const myHotel = req.hotel;
+    if (!myHotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    const competitor = await Competitor.findOne({
+      _id: req.params.id, ownerHotelId: myHotel._id, isActive: true,
+    });
+    if (!competitor) return res.status(404).json({ error: 'Raqib topilmadi' });
+
+    const incoming = req.body?.otaUrls;
+    if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) {
+      return res.status(400).json({ error: 'otaUrls obyekt bo\'lishi kerak' });
+    }
+
+    const merged = { ...normalizeOtaUrls(competitor.otaUrls) };
+    for (const [k, v] of Object.entries(incoming)) {
+      const val = String(v || '').trim();
+      if (!val) delete merged[k];
+      else merged[k] = val;
+    }
+    competitor.otaUrls = merged;
+    competitor.markModified('otaUrls');
+    // Eski oqimlar (Apify city-run mapping) bookingUrl maydonini o'qiydi —
+    // sinxron saqlaymiz.
+    competitor.bookingUrl = merged['Booking.com'] || '';
+    await competitor.save();
+    res.json({ competitor });
+  } catch (err) { next(err); }
+}
+
+/**
+ * POST /hotels/competitors/:id/fetch-channel
+ * Body: { source: 'booking' | 'hotels' | 'expedia' | 'trip' }
+ * Raqibning TANLANGAN kanalidan narx oladi: saqlangan havola bo'lsa o'sha
+ * URL'dan aniq narx (Apify), bo'lmasa avval havolani topib saqlaydi.
+ */
+export async function fetchCompetitorChannel(req, res, next) {
+  try {
+    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
+    const myHotel = req.hotel;
+    if (!myHotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    const competitor = await Competitor.findOne({
+      _id: req.params.id, ownerHotelId: myHotel._id, isActive: true,
+    });
+    if (!competitor) return res.status(404).json({ error: 'Raqib topilmadi' });
+
+    const source = String(req.body?.source || '').toLowerCase();
+    const cfg = APIFY_CHANNEL_SOURCES[source];
+    if (!cfg) return res.status(400).json({ error: `Noma'lum source: ${source}` });
+
+    const urls = normalizeOtaUrls(competitor.otaUrls);
+    let url = urls[cfg.urlKey]
+      || (cfg.urlKey === 'Booking.com' ? competitor.bookingUrl : '')
+      || null;
+
+    // Havola yo'q — avtomatik topamiz va raqibga saqlaymiz (keyingi safar tayyor).
+    if (!url && cfg.finder) {
+      url = await cfg.finder(competitor.name, myHotel.city);
+      if (url) {
+        competitor.otaUrls = { ...urls, [cfg.urlKey]: url };
+        competitor.markModified('otaUrls');
+        if (cfg.urlKey === 'Booking.com' && !competitor.bookingUrl) competitor.bookingUrl = url;
+        await competitor.save().catch(() => {});
+      }
+    }
+    if (!url) {
+      return res.status(404).json({
+        error: `${cfg.label} havolasi topilmadi — raqib kartasida qo'lda kiriting.`,
+      });
+    }
+
+    const result = await cfg.fn(competitor.name, myHotel.city, { [cfg.urlArg]: url });
+    if (!result?.price) {
+      return res.json({ source: cfg.label, price: 0, url, message: `${cfg.label}'dan narx kelmadi` });
+    }
+
+    if (!(competitor.latestPrices instanceof Map)) {
+      competitor.latestPrices = new Map(Object.entries(competitor.latestPrices || {}));
+    }
+    const compKey = cfg.label.toLowerCase().replace(/[^a-z0-9]/g, '');
+    competitor.latestPrices.set(compKey, result.price);
+    competitor.lastPriceFetchedAt = new Date();
+    await competitor.save();
+
+    // PriceSnapshot — Rate Shopper jadvali va trend uchun
+    const checkIn = new Date();
+    checkIn.setDate(checkIn.getDate() + 7);
+    const checkOut = new Date(checkIn);
+    checkOut.setDate(checkOut.getDate() + 1);
+    await PriceSnapshot.create({
+      targetType: 'competitor', targetId: competitor._id,
+      ownerHotelId: myHotel._id, ota: cfg.label,
+      price: result.price, currency: 'USD',
+      checkIn, checkOut, source: 'apify',
+      raw: { link: result.link || url },
+    }).catch(() => {});
+
+    res.json({ source: cfg.label, price: result.price, url, via: 'apify', link: result.link || url });
   } catch (err) { next(err); }
 }
 

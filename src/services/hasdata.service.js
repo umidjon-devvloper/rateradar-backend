@@ -167,55 +167,6 @@ async function placeBookingPrice({ url, checkIn, checkOut }) {
 }
 
 /**
- * Booking.com kategoriya subscore'larini (Cleanliness, Location, Staff, ...)
- * HasData Place API orqali oladi. Place javobidagi `ratings` massivida har bir
- * kategoriya {label, value} ko'rinishida (10 ballik) keladi; "Average" — umumiy.
- *
- * @returns {Promise<{ overall:number, scores: Record<string,number> } | null>}
- */
-export async function getBookingCategoryRatings({ bookingUrl }) {
-  if (!hasHasData()) throw new Error("HASDATA_API_KEY sozlanmagan");
-  if (!bookingUrl || !/booking\.com/.test(bookingUrl)) return null;
-
-  const { checkIn, checkOut } = defaultDates();
-  let data;
-  try {
-    data = await hdGet("place", {
-      url: bookingUrl,
-      checkInDate: checkIn,
-      checkOutDate: checkOut,
-      rooms: 1,
-      adults: 2,
-      children: 0,
-      currency: "usd",
-    });
-    recordApiUsage("hasdata", true, null, "booking_place");
-  } catch (err) {
-    recordApiUsage("hasdata", false, err.message, "booking_place");
-    throw err;
-  }
-
-  const ratings = Array.isArray(data?.ratings) ? data.ratings : [];
-  if (!ratings.length) return null;
-
-  let overall = 0;
-  const scores = {};
-  for (const r of ratings) {
-    const label = String(r?.label || "").trim();
-    const value = Number(r?.value);
-    if (!label || !Number.isFinite(value)) continue;
-    if (/average/i.test(label)) {
-      overall = value;
-    } else {
-      scores[label] = value;
-    }
-  }
-  if (!Object.keys(scores).length) return null;
-
-  return { overall, scores };
-}
-
-/**
  * Booking.com narxini HasData orqali oladi.
  *   - bookingUrl mavjud bo'lsa → Place API (aniqroq)
  *   - aks holda → Search API (nom bo'yicha)
