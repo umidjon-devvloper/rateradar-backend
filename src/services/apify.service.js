@@ -122,6 +122,9 @@ function inputMatches(stored, expected) {
   const stUrl = stored.startUrls?.[0]?.url;
   if (exUrl && stUrl && exUrl === stUrl) return true;
 
+  // destination bo'yicha qidiruvchi aktyorlar (Expedia) — shahar/hotel mos bo'lsa
+  if (expected.destination && stored.destination && expected.destination === stored.destination) return true;
+
   return false;
 }
 
@@ -444,31 +447,50 @@ export async function getAgodaPriceApify() {
 // ─── Expedia ──────────────────────────────────────────────────────────────────
 
 export async function getExpediaPriceApify(hotelName, city, { checkIn, checkOut, expediaUrl } = {}) {
-  if (!env.APIFY_API_KEY || !expediaUrl) return null;
+  if (!env.APIFY_API_KEY || !hotelName) return null;
 
   const ci = checkIn || dateOffset(7);
   const co = checkOut || dateOffset(8);
 
   try {
+    // Aktyor (crawlerbros) hotel URL QABUL QILMAYDI — input sxemasi faqat
+    // destination/checkIn/checkOut. Hotel nomi + shaharni destination qilib
+    // yuboramiz, natijalar ro'yxatidan nom bo'yicha eng mosini tanlaymiz.
     const items = await runAndWait(ACTORS.expedia, {
-      hotelUrls: [expediaUrl],
+      destination: [hotelName, city].filter(Boolean).join(', '),
       checkIn: ci,
       checkOut: co,
       adults: 2,
-      maxItems: 5,
+      rooms: 1,
+      maxItems: 10,
+      proxy: { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
     }, 180);
+    if (!items?.length) return null;
 
-    const item = items?.[0];
-    if (!item) return null;
+    let best = null;
+    let bestScore = 0;
+    for (const it of items) {
+      const nm = it.name || it.title || it.hotelName || '';
+      const score = nameSimilarity(hotelName, nm);
+      if (score > bestScore) { best = it; bestScore = score; }
+    }
+    // Nom mos kelmasa — boshqa mehmonxona narxini qaytarmaymiz.
+    if (!best || bestScore < 0.4) return null;
 
     const rawPrice =
-      item.price ?? item.pricePerNight ?? item.minPrice ??
-      item.totalPrice ?? item.rate ?? null;
+      best.price ?? best.pricePerNight ?? best.minPrice ??
+      best.totalPrice ?? best.rate ?? best.priceText ?? null;
 
     const price = parsePrice(rawPrice);
     if (!price) return null;
 
-    return { source: 'Expedia', price, via: 'apify', link: expediaUrl };
+    return {
+      source: 'Expedia',
+      price,
+      via: 'apify',
+      link: best.url || best.link || expediaUrl || '',
+      matchedName: best.name || best.title || best.hotelName || '',
+    };
   } catch (err) {
     console.warn(`Apify Expedia: ${err.message}`);
     return null;

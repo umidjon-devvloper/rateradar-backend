@@ -1045,7 +1045,9 @@ export async function fetchAllOtaChannels(req, res, next) {
 const APIFY_CHANNEL_SOURCES = {
   booking: { fn: getBookingPriceApify, urlKey: 'Booking.com', urlArg: 'bookingUrl', finder: findBookingUrl, label: 'Booking.com' },
   hotels:  { fn: getHotelsComPriceApify, urlKey: 'Hotels.com', urlArg: 'hotelsUrl', finder: null, label: 'Hotels.com' },
-  expedia: { fn: getExpediaPriceApify, urlKey: 'Expedia', urlArg: 'expediaUrl', finder: findExpediaUrl, label: 'Expedia' },
+  // Expedia aktyori URL emas, nom+shahar (destination) bo'yicha qidiradi —
+  // URL bo'lmasa ham ishlayveradi (requiresUrl: false).
+  expedia: { fn: getExpediaPriceApify, urlKey: 'Expedia', urlArg: 'expediaUrl', finder: findExpediaUrl, label: 'Expedia', requiresUrl: false },
   trip:    { fn: getTripComPriceApify, urlKey: 'Trip.com', urlArg: 'tripUrl', finder: findTripUrl, label: 'Trip.com' },
 };
 
@@ -1070,7 +1072,7 @@ export async function fetchOtaChannel(req, res, next) {
       if (url) await saveHotelOtaUrl(hotel._id, cfg.urlKey, url).catch(() => {});
     }
 
-    if (!url) {
+    if (!url && cfg.requiresUrl !== false) {
       return res.status(404).json({
         error: `${cfg.label} URL topilmadi. Sozlamalarda qo'shing.`,
       });
@@ -1659,7 +1661,7 @@ export async function fetchCompetitorChannel(req, res, next) {
         await competitor.save().catch(() => {});
       }
     }
-    if (!url) {
+    if (!url && cfg.requiresUrl !== false) {
       return res.status(404).json({
         error: `${cfg.label} havolasi topilmadi — raqib kartasida qo'lda kiriting.`,
       });
