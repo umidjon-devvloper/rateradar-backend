@@ -290,7 +290,12 @@ function flattenValues(obj, out = [], depth = 0) {
 function hasMongoOperatorKey(obj, depth = 0) {
   if (depth > 4 || obj == null || typeof obj !== 'object') return false;
   for (const k of Object.keys(obj)) {
-    if (k.startsWith('$') || k.includes('.')) return true;
+    // Faqat '$' bilan boshlangan kalitlar — Mongo operator injection.
+    // '.' li kalitlarni BLOKLAMAYMIZ: legit maydonlar bor ('Booking.com',
+    // 'Trip.com', 'Hotels.com' — otaUrls kalitlari) va controller'lar
+    // baribir maydonlarni whitelist qiladi. Avval '.' ham bloklangani uchun
+    // otaUrls saqlash 400 "Noto'g'ri so'rov" bilan yiqilardi.
+    if (k.startsWith('$')) return true;
     if (hasMongoOperatorKey(obj[k], depth + 1)) return true;
   }
   return false;
