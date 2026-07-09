@@ -5,6 +5,17 @@ import { allProviders } from './serpProviders.js';
 
 const CITY_SEARCH_RADIUS_KM = 25;
 
+// Places API sarlavhalari. Kalit "HTTP referrers" cheklovli bo'lsa, serverdan
+// referer bo'sh ketadi va Google 403 API_KEY_HTTP_REFERRER_BLOCKED qaytaradi —
+// GOOGLE_PLACES_REFERER env'ida ruxsat etilgan domen berilsa, shu yuboriladi.
+function placesHeaders(fieldMask) {
+  return {
+    'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
+    'X-Goog-FieldMask': fieldMask,
+    ...(env.GOOGLE_PLACES_REFERER && { Referer: env.GOOGLE_PLACES_REFERER }),
+  };
+}
+
 export async function searchHotels(query, countryCode = '', cityContext = {}) {
   // 1. Google Places
   if (env.GOOGLE_PLACES_API_KEY) {
@@ -111,11 +122,7 @@ async function googlePlacesCityHotels(cityContext) {
       ...(pageToken && { pageToken }),
     };
     const r = await axios.post('https://places.googleapis.com/v1/places:searchText', body, {
-      headers: {
-        'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask':
-          'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,nextPageToken',
-      },
+      headers: placesHeaders('places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,nextPageToken'),
       timeout: 12000,
     });
     for (const p of r.data?.places || []) {
@@ -239,10 +246,7 @@ async function googlePlacesSearch(query, countryCode, cityContext = {}) {
       }),
     },
     {
-      headers: {
-        'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.photos',
-      },
+      headers: placesHeaders('places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.photos'),
       timeout: 10000,
     }
   );
@@ -270,10 +274,7 @@ async function googlePlacesNearby(lat, lng, radiusKm) {
       },
     },
     {
-      headers: {
-        'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount',
-      },
+      headers: placesHeaders('places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount'),
       timeout: 10000,
     }
   );

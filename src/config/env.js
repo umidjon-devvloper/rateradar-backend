@@ -44,6 +44,10 @@ const schema = z.object({
   // VPS'da 1.7GB dump yuklamaslik uchun 'api' qo'ying.
   CITIES_SOURCE: z.enum(['auto', 'api', 'local']).default('auto'),
   GOOGLE_PLACES_API_KEY: z.string().optional(),
+  // Places kaliti "HTTP referrers" cheklovli bo'lsa, serverdan yuboriladigan
+  // Referer sarlavhasi (masalan https://rateradar.uz). Aks holda Google
+  // 403 API_KEY_HTTP_REFERRER_BLOCKED qaytaradi. IP-cheklovli kalitda shart emas.
+  GOOGLE_PLACES_REFERER: z.string().optional(),
   MAKCORPS_API_KEY: z.string().optional(),
 
   // ─── Hotels scraper MIKROSERVISI (alohida puppeteer server) ────────────

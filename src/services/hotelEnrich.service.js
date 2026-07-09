@@ -284,6 +284,8 @@ async function googlePlacesEnrich(name, city, countryCode, coords = {}) {
       headers: {
         'X-Goog-Api-Key': env.GOOGLE_PLACES_API_KEY,
         'X-Goog-FieldMask': 'places.displayName,places.rating,places.userRatingCount,places.photos',
+        // Referer-cheklovli kalit uchun (403 API_KEY_HTTP_REFERRER_BLOCKED oldini oladi)
+        ...(env.GOOGLE_PLACES_REFERER && { Referer: env.GOOGLE_PLACES_REFERER }),
       },
       timeout: 10000,
     }
