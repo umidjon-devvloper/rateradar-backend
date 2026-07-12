@@ -64,18 +64,36 @@ const setupRequestHandlers = (bot) => {
         }
       );
 
-      // Boshqa xodimlarning xabarlarini yangilash
+      // Qolgan chatlardagi xabarlarni yangilash:
+      //   • GURUH — "X qabul qildi" + "Bajarildi" tugmasi QOLADI (tugma faqat
+      //     qabul qilgan odamga ishlaydi — boshqa bossa notYourRequest chiqadi)
+      //   • qabul qilganning shaxsiy chati — accepted matni + "Bajarildi" tugmasi
+      //     (guruhdan qabul qilgan bo'lsa ham shaxsiyda tugmasi bo'lsin)
+      //   • boshqa xodimlar — "X qabul qildi", tugmasiz
       const staffName = staff?.full_name || "Xodim";
+      const clickedChatId = ctx.chat?.id;
+      const doneKeyboard = {
+        inline_keyboard: [[{ text: m.doneBtn, callback_data: `complete_${requestId}` }]],
+      };
       for (const [idStr, msgId] of request.msg_ids.entries()) {
-        if (parseInt(idStr) !== telegramId) {
-          try {
-            await bot.telegram.editMessageText(
-              parseInt(idStr), msgId, null,
-              m.takenByOther(staffName),
-              { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } }
-            );
-          } catch (_) {}
-        }
+        const chatId = parseInt(idStr);
+        if (chatId === clickedChatId) continue; // bosilgan xabar allaqachon yangilandi
+        const isGroupChat = chatId < 0;
+        const isAcceptorPrivate = chatId === telegramId;
+        try {
+          await bot.telegram.editMessageText(
+            chatId, msgId, null,
+            isAcceptorPrivate
+              ? m.accepted(request.room_number, request.service_id?.name || "") + `\n👤 ${staffName}`
+              : m.takenByOther(staffName),
+            {
+              parse_mode: "HTML",
+              reply_markup: (isGroupChat || isAcceptorPrivate)
+                ? doneKeyboard
+                : { inline_keyboard: [] },
+            }
+          );
+        } catch (_) {}
       }
 
       emit.requestAccepted(request.hotel_id, {
