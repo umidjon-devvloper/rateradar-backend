@@ -1,6 +1,7 @@
 const { Telegraf } = require("telegraf");
 const { setupRegistration } = require("./handlers/registration");
 const { setupRequestHandlers } = require("./handlers/requests");
+const { setupGroupHandlers } = require("./handlers/group");
 
 let bot = null;
 
@@ -12,6 +13,9 @@ const initBot = () => {
 
   bot = new Telegraf(process.env.BOT_TOKEN);
 
+  // MUHIM TARTIB: guruh komandalar birinchi — registration'dagi bot.on("text")
+  // next() chaqirmaydi, keyin ulangan komandalar unga yutilib ketardi.
+  setupGroupHandlers(bot);
   setupRegistration(bot);
   setupRequestHandlers(bot);
 

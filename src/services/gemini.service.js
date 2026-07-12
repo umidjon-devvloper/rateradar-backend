@@ -155,6 +155,51 @@ Qoidalar:
 - Foydalanuvchi tilida javob bering (o'zbek, rus yoki ingliz)
 - Texnik muammo bo'lsa Telegram yoki email orqali murojaat qilishni tavsiya eting`;
 
+/**
+ * Mehmonxona egasi uchun AI YORDAMCHI CHAT (AI-tahlil sahifasi).
+ * chatSupport'dan farqi: mavzu keng (travel/hotel biznesi, narx strategiyasi,
+ * marketing, mehmon xizmati...) va javobga mehmonxonaning real konteksti
+ * (nomi, shahri, narxi, reytingi, raqiblar) qo'shiladi.
+ *
+ * @param messages [{role:'user'|'assistant', content}] — oxirgisi yangi savol
+ * @param context  string — hotel haqidagi qisqa ma'lumot (controller tayyorlaydi)
+ */
+export async function assistantChat(messages, context = '') {
+  const m = getTextModel();
+  if (!m) return 'AI yordamchi hozircha sozlanmagan (GEMINI_API_KEY yo\'q).';
+
+  const sys = `Siz TheHotelSaaS platformasidagi mehmonxona egasining shaxsiy AI maslahatchisisiz.
+
+Mavzular: mehmonxona biznesi, narx strategiyasi (revenue management), OTA kanallar (Booking, Agoda...), mehmon xizmati, sharhlar bilan ishlash, marketing, turizm/travel savollari. Shu doiradan tashqari savollarga qisqa: "Men mehmonxona va sayohat bo'yicha yordamchiman" deb javob bering.
+
+${context ? `FOYDALANUVCHINING MEHMONXONASI:\n${context}\n` : ''}
+Qoidalar:
+- Foydalanuvchi tilida javob bering (o'zbek/rus/ingliz)
+- Amaliy va aniq maslahat bering, suvni ko'paytirmang (maksimum 6-8 jumla)
+- Raqamlar bilan gaplashing (narx, foiz), mehmonxona kontekstidan foydalaning
+- Markdown ishlatmang, oddiy matn`;
+
+  const history = [
+    { role: 'user', parts: [{ text: sys }] },
+    { role: 'model', parts: [{ text: 'Tushunarli. Mehmonxonangiz bo\'yicha savollaringizga tayyorman.' }] },
+    ...messages.slice(0, -1).map((msg) => ({
+      role: msg.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: msg.content }],
+    })),
+  ];
+
+  try {
+    const chat = m.startChat({ history });
+    const result = await chat.sendMessage(messages[messages.length - 1]?.content || '');
+    recordApiUsage('gemini', true);
+    return result.response.text();
+  } catch (err) {
+    recordApiUsage('gemini', false, err);
+    console.error('Gemini assistantChat xato:', err.message);
+    return 'Texnik xatolik yuz berdi — birozdan keyin qayta urinib ko\'ring.';
+  }
+}
+
 export async function chatSupport(messages) {
   const m = getTextModel();
 

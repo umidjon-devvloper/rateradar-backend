@@ -8,7 +8,7 @@ import {
   summarizeReviews,
   isAIEnabled,
 } from "../services/openai.service.js";
-import { chatSupport } from "../services/gemini.service.js";
+import { chatSupport, assistantChat } from "../services/gemini.service.js";
 
 export function getAIStatus(req, res) {
   res.json({ enabled: isAIEnabled(), model: "gpt-4o-mini" });
@@ -175,6 +175,55 @@ export async function aiAnalyzeSingleReview(req, res, next) {
 
     const result = await analyzeReview(text.trim(), lang);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /ai/assistant-chat — AI-tahlil sahifasidagi CHAT.
+ * Mehmonxona egasi istalgan travel/hotel savolini beradi; javobga uning
+ * mehmonxonasi konteksti (nom, shahar, narx, reyting, raqiblar) qo'shiladi.
+ */
+export async function aiAssistantChat(req, res, next) {
+  try {
+    const { messages } = req.body;
+    if (!Array.isArray(messages) || !messages.length) {
+      return res.status(400).json({ error: "messages talab etiladi" });
+    }
+    const safe = messages.slice(-20).map((m) => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: String(m.content || '').slice(0, 1000),
+    }));
+
+    // Hotel konteksti — qisqa, tokenlarni tejab
+    const hotel = req.hotel;
+    let context = '';
+    if (hotel) {
+      const parts = [
+        `Nomi: ${hotel.name}${hotel.city ? `, ${hotel.city}` : ''}${hotel.country ? ` (${hotel.country})` : ''}`,
+        hotel.stars ? `Yulduz: ${hotel.stars}` : '',
+        hotel.rating ? `Reyting: ${hotel.rating} (${hotel.reviewCount || 0} sharh)` : '',
+        hotel.currentPrice ? `Joriy narx: ${hotel.currentPrice} ${hotel.currency || 'USD'}` : '',
+        hotel.rooms ? `Xonalar soni: ${hotel.rooms}` : '',
+      ].filter(Boolean);
+      try {
+        const comps = await Competitor.find({ ownerHotelId: hotel._id, isActive: true })
+          .select('name latestPrices stars').limit(6).lean();
+        if (comps.length) {
+          const compLine = comps.map((c) => {
+            const p = c.latestPrices?.bookingcom || c.latestPrices?.booking ||
+              Object.values(c.latestPrices || {}).find((v) => v > 0) || 0;
+            return `${c.name}${p ? ` ($${p})` : ''}`;
+          }).join(', ');
+          parts.push(`Raqiblar: ${compLine}`);
+        }
+      } catch { /* raqibsiz davom etamiz */ }
+      context = parts.join('\n');
+    }
+
+    const reply = await assistantChat(safe, context);
+    res.json({ reply });
   } catch (err) {
     next(err);
   }

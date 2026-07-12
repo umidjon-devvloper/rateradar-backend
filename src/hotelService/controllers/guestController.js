@@ -74,10 +74,22 @@ const getTranslatedServices = async (req, res) => {
           })
         );
 
+        // Item'lar (menyu) tarjimasi — faqat faollari mehmonga ko'rinadi
+        const translatedItems = await Promise.all(
+          (svcObj.items || []).filter((it) => it.is_active !== false).map(async (it) => {
+            let tName = it.translations?.[guestLang];
+            if (!tName) {
+              tName = await translate(it.name, hotelLang, guestLang);
+            }
+            return { ...it, translated_name: tName };
+          })
+        );
+
         return {
           ...svcObj,
           translated_name: translatedName,
           sub_options: translatedSubOptions,
+          items: translatedItems,
         };
       })
     );
@@ -198,7 +210,8 @@ const sendToStaff = async (request, service, hotel) => {
       service_ids: service._id,
     });
 
-    if (staffList.length === 0) return;
+    // Xodim ham, ulangan guruh ham bo'lmasa — yuboradigan joy yo'q.
+    if (staffList.length === 0 && !hotel.group_chat_id) return;
 
     const m = getMsg(hotel.language);
     const time = new Date().toLocaleTimeString("en-GB", {
@@ -224,6 +237,25 @@ const sendToStaff = async (request, service, hotel) => {
         msgIds[staff.telegram_id.toString()] = sent.message_id;
       } catch (err) {
         console.error(`Staff ${staff.telegram_id} ga xabar yuborilmadi:`, err.message);
+      }
+    }
+
+    // Ulangan Telegram GURUHga ham yuboramiz (bot guruhda /ulash bilan
+    // bog'langan bo'lsa). Guruhdagi xabar ham accept tugmasi bilan keladi —
+    // kim birinchi bossa, o'sha oladi; qolgan xabarlar avtomatik yangilanadi.
+    if (hotel.group_chat_id) {
+      try {
+        const sent = await bot.telegram.sendMessage(hotel.group_chat_id, text, keyboard);
+        msgIds[hotel.group_chat_id.toString()] = sent.message_id;
+      } catch (err) {
+        console.error(`Guruh ${hotel.group_chat_id} ga xabar yuborilmadi:`, err.message);
+        // Bot guruhdan chiqarilgan bo'lsa — bog'lamani tozalaymiz
+        if (/chat not found|kicked|blocked/i.test(err.message)) {
+          await Hotel.updateOne(
+            { hotel_id: hotel.hotel_id },
+            { $set: { group_chat_id: null, group_title: "" } }
+          ).catch(() => {});
+        }
       }
     }
 

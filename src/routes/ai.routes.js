@@ -7,6 +7,7 @@ import {
   aiSummarizeReviews,
   aiAnalyzeSingleReview,
   aiChatSupport,
+  aiAssistantChat,
 } from '../controllers/ai.controller.js';
 
 const router = Router();
@@ -91,5 +92,33 @@ router.post('/analyze-review', requireAuth, resolveHotel, aiAnalyzeSingleReview)
  *       200: { description: AI javobi }
  */
 router.post('/chat', aiChatSupport);
+
+/**
+ * @openapi
+ * /ai/assistant-chat:
+ *   post:
+ *     tags: [AI]
+ *     summary: AI-tahlil sahifasidagi shaxsiy yordamchi chat (hotel konteksti bilan)
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               messages:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     role: { type: string, enum: [user, assistant] }
+ *                     content: { type: string }
+ *     responses:
+ *       200: { description: "AI javobi { reply }" }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.post('/assistant-chat', requireAuth, resolveHotel, aiAssistantChat);
 
 export default router;

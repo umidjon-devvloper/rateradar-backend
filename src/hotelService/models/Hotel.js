@@ -25,6 +25,11 @@ const hotelSchema = new mongoose.Schema({
   // Default 4 xizmat bir marta qo'shilganini belgilaydi (qayta qo'shilmasin)
   defaults_seeded: { type: Boolean, default: false },
 
+  // Telegram GURUH integratsiyasi: bot guruhga qo'shilib, guruhda
+  // /ulash inv_XXXX yuborilsa, barcha buyurtmalar shu guruhga ham tushadi.
+  group_chat_id: { type: Number, default: null },
+  group_title:   { type: String, default: "" },
+
   // Mehmon webapp sahifasi dizayni (admin o'zgartiradi)
   branding: {
     theme:        { type: String, default: "blue" },     // tayyor mavzu kaliti

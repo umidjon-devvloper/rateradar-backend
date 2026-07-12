@@ -1,7 +1,7 @@
 const router    = require("express").Router();
 const hotelAuth = require("../middleware/hotelAuth");
 const {
-  verifySSO, getMe, updateSettings, updateBranding,
+  verifySSO, getMe, updateSettings, updateBranding, uploadImage,
   getActiveStaff, updateStaff, deleteStaff,
   getServices, createService, updateService, deleteService, regenerateServiceInvite,
   getRequests, getReports, getReviews,
@@ -15,6 +15,8 @@ router.use(hotelAuth);
 router.get("/me", getMe);
 router.put("/settings", updateSettings);
 router.put("/branding", updateBranding);
+// Xizmat item'lari uchun rasm yuklash (base64 → /uploads/hs/...)
+router.post("/upload-image", uploadImage);
 
 // Staff — pending holat yo'q endi
 router.get("/staff",        getActiveStaff);

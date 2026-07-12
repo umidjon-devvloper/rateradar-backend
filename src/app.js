@@ -1,4 +1,6 @@
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
 import { createRequire } from "module";
 import cors from "cors";
 import helmet from "helmet";
@@ -66,6 +68,17 @@ app.use(
 );
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
+
+// Yuklangan rasmlar (hotel-service item'lari va h.k.) — backend/uploads/.
+// Frontend boshqa domenda bo'lgani uchun helmet'ning same-origin CORP
+// sarlavhasini shu yo'lda ochamiz, aks holda brauzer rasmlarni bloklaydi.
+app.use(
+  "/uploads",
+  express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads"), {
+    maxAge: "7d",
+    setHeaders: (res) => res.setHeader("Cross-Origin-Resource-Policy", "cross-origin"),
+  }),
+);
 if (isDev) app.use(morgan("dev"));
 
 // Xavfsizlik darvozasi — body parse'dan KEYIN (injection tekshiruvi uchun),

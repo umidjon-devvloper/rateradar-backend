@@ -1,5 +1,7 @@
 const jwt       = require("jsonwebtoken");
 const mongoose  = require("mongoose");
+const fs        = require("fs");
+const path      = require("path");
 const { nanoid } = require("nanoid");
 const Hotel     = require("../models/Hotel");
 const Staff     = require("../models/Staff");
@@ -86,7 +88,41 @@ const getMe = async (req, res) => {
     hotel_id: req.hotel.hotel_id, hotel_name: req.hotel.hotel_name,
     language: req.hotel.language, subscription: req.hotel.subscription,
     branding: req.hotel.branding || {},
+    invite_code: req.hotel.invite_code,
+    // Telegram guruh integratsiyasi holati (SettingsPage ko'rsatadi)
+    group_chat_id: req.hotel.group_chat_id || null,
+    group_title:   req.hotel.group_title || "",
+    bot_username:  process.env.BOT_USERNAME || "",
   });
+};
+
+// ─── RASM YUKLASH (xizmat item'lari uchun) ─────────────────────────────────────
+// Base64 dataURL qabul qiladi, backend/uploads/hs/<hotelId>/ ga saqlaydi.
+// Express static /uploads orqali tarqatadi (app.js). Limit: ~1.5MB.
+const UPLOADS_ROOT = path.resolve(__dirname, "../../../uploads");
+
+const uploadImage = async (req, res) => {
+  try {
+    const { image } = req.body || {};
+    const m = /^data:image\/(png|jpe?g|webp|gif);base64,(.+)$/i.exec(String(image || ""));
+    if (!m) return res.status(400).json({ message: "image: data:image/...;base64 formati kerak" });
+
+    const ext = m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
+    const buf = Buffer.from(m[2], "base64");
+    if (buf.length > 1.5 * 1024 * 1024) {
+      return res.status(413).json({ message: "Rasm 1.5MB dan katta — kichikroq rasm yuklang" });
+    }
+
+    const dir = path.join(UPLOADS_ROOT, "hs", req.hotelId);
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${nanoid(10)}.${ext}`;
+    fs.writeFileSync(path.join(dir, filename), buf);
+
+    res.json({ url: `/uploads/hs/${req.hotelId}/${filename}` });
+  } catch (err) {
+    console.error("uploadImage:", err.message);
+    res.status(500).json({ message: "Server xatosi" });
+  }
 };
 
 // ─── BRANDING (mehmon webapp dizayni) ───────────────────────────────────────────
@@ -185,9 +221,19 @@ const getServices = async (req, res) => {
   } catch (_) { res.status(500).json({ message: "Server xatosi" }); }
 };
 
+// Item'larni tozalash — faqat ruxsat etilgan maydonlar (nom majburiy)
+const cleanItems = (items) => (items || [])
+  .filter((it) => it && String(it.name || "").trim())
+  .map((it) => ({
+    name: String(it.name).trim(),
+    price: Number(it.price) > 0 ? Math.round(Number(it.price)) : 0,
+    image_url: String(it.image_url || ""),
+    is_active: it.is_active !== false,
+  }));
+
 const createService = async (req, res) => {
   try {
-    const { name, icon, sub_options } = req.body;
+    const { name, icon, sub_options, items } = req.body;
     if (!name) return res.status(400).json({ message: "Xizmat nomi majburiy" });
 
     const cleanSubs = (sub_options || []).map(({ name: n }) => ({ name: n }));
@@ -195,6 +241,7 @@ const createService = async (req, res) => {
       hotel_id: req.hotelId, name,
       icon: icon || "🛎",
       sub_options: cleanSubs,
+      items: cleanItems(items),
     });
 
     const botUsername = process.env.BOT_USERNAME || "YOUR_BOT";
@@ -214,6 +261,7 @@ const updateService = async (req, res) => {
     if (updateData.sub_options) {
       updateData.sub_options = updateData.sub_options.map(({ name: n }) => ({ name: n }));
     }
+    if (updateData.items) updateData.items = cleanItems(updateData.items);
     if (updateData.name) updateData.translations = {};
 
     const service = await Service.findOneAndUpdate(
@@ -382,7 +430,7 @@ const getReviews = async (req, res) => {
 };
 
 module.exports = {
-  verifySSO, getMe, updateSettings, updateBranding,
+  verifySSO, getMe, updateSettings, updateBranding, uploadImage,
   getActiveStaff, updateStaff, deleteStaff,
   getServices, createService, updateService, deleteService, regenerateServiceInvite,
   getRequests, getReports, getReviews,

@@ -6,6 +6,16 @@ const subOptionSchema = new mongoose.Schema({
   translations: { type: Map, of: String, default: {} },
 }, { _id: true });
 
+// Xizmat ichidagi mahsulotlar (menyu) — masalan "Ovqat" xizmati ichida
+// taomlar, "Ichimliklar" ichida ichimliklar. Rasm va narx bilan.
+const itemSchema = new mongoose.Schema({
+  name:      { type: String, required: true },
+  price:     { type: Number, default: 0 },      // 0 = narx ko'rsatilmaydi
+  image_url: { type: String, default: "" },      // /uploads/hs/... yoki tashqi URL
+  is_active: { type: Boolean, default: true },
+  translations: { type: Map, of: String, default: {} },
+}, { _id: true });
+
 const serviceSchema = new mongoose.Schema({
   hotel_id:  { type: String, required: true, index: true },
   name:      { type: String, required: true },
@@ -27,6 +37,7 @@ const serviceSchema = new mongoose.Schema({
   translations: { type: Map, of: String, default: {} },
 
   sub_options: [subOptionSchema],
+  items:       [itemSchema],
   created_at: { type: Date, default: Date.now },
 });
 
