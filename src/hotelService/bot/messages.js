@@ -13,6 +13,7 @@ const MSGS = {
     sendPhoneAgain: "📱 Please send your phone number using the button:",
     error: "❌ An error occurred. Please try again.",
     alreadyTaken: "⚠️ This request has already been accepted.",
+    notAssigned: "⚠️ You are not assigned to this service.",
     completed: "✅ Job completed! Thank you.",
     notYourRequest: "⚠️ This request was not assigned to you.",
     newRequest: (room, service, subOpt, desc, time) => {
@@ -25,6 +26,8 @@ const MSGS = {
     accepted: (room, service) =>
       `✅ Request accepted!\n\n🏠 Room: ${room}\n🛎 Service: ${service}\n\nPress "Done" when finished.`,
     takenByOther: (name) => `ℹ️ This request was taken by <b>${name}</b>.`,
+    completedByOther: (room, service, name) =>
+      `✅ Completed!\n\n🏠 Room: ${room}\n🛎 Service: ${service}\n👤 Done by: <b>${name}</b>`,
     acceptBtn: "✅ Accept",
     doneBtn: "✅ Done",
   },
@@ -41,6 +44,7 @@ const MSGS = {
     sendPhoneAgain: "📱 Отправьте номер телефона через кнопку:",
     error: "❌ Произошла ошибка. Попробуйте снова.",
     alreadyTaken: "⚠️ Эта заявка уже принята другим сотрудником.",
+    notAssigned: "⚠️ Вы не прикреплены к этой услуге.",
     completed: "✅ Работа выполнена! Спасибо.",
     notYourRequest: "⚠️ Эта заявка не принята вами.",
     newRequest: (room, service, subOpt, desc, time) => {
@@ -53,6 +57,8 @@ const MSGS = {
     accepted: (room, service) =>
       `✅ Заявка принята!\n\n🏠 Номер: ${room}\n🛎 Услуга: ${service}\n\nНажмите "Выполнено" после завершения.`,
     takenByOther: (name) => `ℹ️ Заявку принял(а) <b>${name}</b>.`,
+    completedByOther: (room, service, name) =>
+      `✅ Выполнено!\n\n🏠 Номер: ${room}\n🛎 Услуга: ${service}\n👤 Выполнил(а): <b>${name}</b>`,
     acceptBtn: "✅ Принять",
     doneBtn: "✅ Выполнено",
   },
@@ -69,6 +75,7 @@ const MSGS = {
     sendPhoneAgain: "📱 Telefon raqamingizni tugma orqali yuboring:",
     error: "❌ Xatolik yuz berdi. Qayta urining.",
     alreadyTaken: "⚠️ Bu buyurtma allaqachon qabul qilingan.",
+    notAssigned: "⚠️ Bu xizmat sizga biriktirilmagan.",
     completed: "✅ Ish bajarildi! Rahmat.",
     notYourRequest: "⚠️ Bu buyurtma sizga tegishli emas.",
     newRequest: (room, service, subOpt, desc, time) => {
@@ -81,6 +88,8 @@ const MSGS = {
     accepted: (room, service) =>
       `✅ Qabul qilindi!\n\n🏠 Xona: ${room}\n🛎 Xizmat: ${service}\n\nIsh tugagach "Bajarildi" tugmasini bosing.`,
     takenByOther: (name) => `ℹ️ Bu buyurtmani <b>${name}</b> qabul qildi.`,
+    completedByOther: (room, service, name) =>
+      `✅ Bajarildi!\n\n🏠 Xona: ${room}\n🛎 Xizmat: ${service}\n👤 Bajardi: <b>${name}</b>`,
     acceptBtn: "✅ Qabul qilish",
     doneBtn: "✅ Bajarildi",
   },
@@ -97,6 +106,7 @@ const MSGS = {
     sendPhoneAgain: "📱 Telefon numaranızı düğme ile gönderin:",
     error: "❌ Bir hata oluştu. Tekrar deneyin.",
     alreadyTaken: "⚠️ Bu talep zaten kabul edildi.",
+    notAssigned: "⚠️ Bu hizmete atanmadınız.",
     completed: "✅ İş tamamlandı! Teşekkürler.",
     notYourRequest: "⚠️ Bu talep size ait değil.",
     newRequest: (room, service, subOpt, desc, time) => {
@@ -109,6 +119,8 @@ const MSGS = {
     accepted: (room, service) =>
       `✅ Talep kabul edildi!\n\n🏠 Oda: ${room}\n🛎 Hizmet: ${service}\n\nBitince "Tamamlandı" düğmesine basın.`,
     takenByOther: (name) => `ℹ️ Bu talebi <b>${name}</b> kabul etti.`,
+    completedByOther: (room, service, name) =>
+      `✅ Tamamlandı!\n\n🏠 Oda: ${room}\n🛎 Hizmet: ${service}\n👤 Yapan: <b>${name}</b>`,
     acceptBtn: "✅ Kabul Et",
     doneBtn: "✅ Tamamlandı",
   },
@@ -125,6 +137,7 @@ const MSGS = {
     sendPhoneAgain: "📱 Bitte Nummer über den Button senden:",
     error: "❌ Fehler aufgetreten. Erneut versuchen.",
     alreadyTaken: "⚠️ Diese Anfrage wurde bereits angenommen.",
+    notAssigned: "⚠️ Sie sind diesem Service nicht zugewiesen.",
     completed: "✅ Arbeit erledigt! Danke.",
     notYourRequest: "⚠️ Diese Anfrage gehört nicht Ihnen.",
     newRequest: (room, service, subOpt, desc, time) => {
@@ -137,6 +150,8 @@ const MSGS = {
     accepted: (room, service) =>
       `✅ Anfrage angenommen!\n\n🏠 Zimmer: ${room}\n🛎 Service: ${service}\n\nDrücken Sie "Erledigt" wenn fertig.`,
     takenByOther: (name) => `ℹ️ Anfrage wurde von <b>${name}</b> angenommen.`,
+    completedByOther: (room, service, name) =>
+      `✅ Erledigt!\n\n🏠 Zimmer: ${room}\n🛎 Service: ${service}\n👤 Erledigt von: <b>${name}</b>`,
     acceptBtn: "✅ Annehmen",
     doneBtn: "✅ Erledigt",
   },
@@ -153,6 +168,7 @@ const MSGS = {
     sendPhoneAgain: "📱 Envoyez votre numéro via le bouton:",
     error: "❌ Une erreur s'est produite. Réessayez.",
     alreadyTaken: "⚠️ Cette demande a déjà été acceptée.",
+    notAssigned: "⚠️ Vous n'êtes pas affecté à ce service.",
     completed: "✅ Travail terminé! Merci.",
     notYourRequest: "⚠️ Cette demande ne vous appartient pas.",
     newRequest: (room, service, subOpt, desc, time) => {
@@ -165,6 +181,8 @@ const MSGS = {
     accepted: (room, service) =>
       `✅ Demande acceptée!\n\n🏠 Chambre: ${room}\n🛎 Service: ${service}\n\nAppuyez sur "Terminé" quand c'est fait.`,
     takenByOther: (name) => `ℹ️ Demande acceptée par <b>${name}</b>.`,
+    completedByOther: (room, service, name) =>
+      `✅ Terminé!\n\n🏠 Chambre: ${room}\n🛎 Service: ${service}\n👤 Fait par: <b>${name}</b>`,
     acceptBtn: "✅ Accepter",
     doneBtn: "✅ Terminé",
   },
