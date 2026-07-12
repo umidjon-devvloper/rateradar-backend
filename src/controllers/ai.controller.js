@@ -219,6 +219,25 @@ export async function aiAssistantChat(req, res, next) {
           parts.push(`Raqiblar: ${compLine}`);
         }
       } catch { /* raqibsiz davom etamiz */ }
+
+      // Oxirgi SHARHLAR — AI ular haqida bemalol gaplasha olishi uchun.
+      // Eng yangi 15 tasi, matni qisqartirilgan (token tejash).
+      try {
+        const reviews = await Review.find({ ownerHotelId: hotel._id, targetType: 'own' })
+          .sort({ publishedAt: -1 })
+          .select('platform rating text sentiment publishedAt author')
+          .limit(15)
+          .lean();
+        if (reviews.length) {
+          const lines = reviews.map((r) => {
+            const d = r.publishedAt ? new Date(r.publishedAt).toISOString().slice(0, 10) : '';
+            const txt = String(r.text || '').replace(/\s+/g, ' ').slice(0, 220);
+            return `- [${r.platform} ${r.rating}★ ${d}] ${txt}`;
+          });
+          parts.push(`Oxirgi sharhlar (${reviews.length} ta):\n${lines.join('\n')}`);
+        }
+      } catch { /* sharhsiz davom etamiz */ }
+
       context = parts.join('\n');
     }
 

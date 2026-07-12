@@ -165,18 +165,24 @@ Qoidalar:
  * @param context  string — hotel haqidagi qisqa ma'lumot (controller tayyorlaydi)
  */
 export async function assistantChat(messages, context = '') {
-  const m = getTextModel();
-  if (!m) return 'AI yordamchi hozircha sozlanmagan (GEMINI_API_KEY yo\'q).';
+  if (!env.GEMINI_API_KEY) return 'AI yordamchi hozircha sozlanmagan (GEMINI_API_KEY yo\'q).';
+  // Yordamchi chat uchun alohida model konfiguratsiyasi — javoblar uzunroq
+  // bo'lishi mumkin (sharh tahlili, reja tuzish), shuning uchun 1024 token.
+  if (!genAI) genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
+  const m = genAI.getGenerativeModel({
+    model: 'gemini-2.5-flash',
+    generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+  });
 
-  const sys = `Siz TheHotelSaaS platformasidagi mehmonxona egasining shaxsiy AI maslahatchisisiz.
+  const sys = `Siz TheHotelSaaS platformasidagi mehmonxona egasining shaxsiy AI maslahatchisisiz — mehmonxona va SAYOHAT (travel) sohasining keng bilimdoni.
 
-Mavzular: mehmonxona biznesi, narx strategiyasi (revenue management), OTA kanallar (Booking, Agoda...), mehmon xizmati, sharhlar bilan ishlash, marketing, turizm/travel savollari. Shu doiradan tashqari savollarga qisqa: "Men mehmonxona va sayohat bo'yicha yordamchiman" deb javob bering.
+Erkin gaplashadigan mavzularingiz: mehmonxona biznesi, narx strategiyasi (revenue management), OTA kanallar (Booking, Agoda...), mehmon xizmati va sharhlar, marketing, turizm trendlari, sayohat yo'nalishlari, mehmonlar psixologiyasi, mavsumiylik, mahalliy turizm (O'zbekiston, Buxoro-Samarqand yo'nalishlari) — umuman travel sohasiga aloqador HAR QANDAY savol. Faqat butunlay boshqa sohaga (masalan dasturlash, siyosat) kirsa, muloyimlik bilan travel doirasiga qaytaring.
 
-${context ? `FOYDALANUVCHINING MEHMONXONASI:\n${context}\n` : ''}
+${context ? `FOYDALANUVCHINING MEHMONXONASI VA REAL MA'LUMOTLARI:\n${context}\n\nMUHIM: Yuqorida mehmonxonaning REAL sharhlari berilgan — "sharhlarni ko'ra olmayman" DEMANG. Sharhlar haqida so'ralsa, aynan shu berilgan sharhlarni tahlil qiling: nimadan mamnun, nimadan shikoyat, qaysi sharhga qanday javob berish kerak — konkret ayting.\n` : ''}
 Qoidalar:
 - Foydalanuvchi tilida javob bering (o'zbek/rus/ingliz)
-- Amaliy va aniq maslahat bering, suvni ko'paytirmang (maksimum 6-8 jumla)
-- Raqamlar bilan gaplashing (narx, foiz), mehmonxona kontekstidan foydalaning
+- Amaliy va aniq maslahat bering, raqamlar bilan gaplashing (narx, foiz, sana)
+- Oddiy savolga qisqa (3-5 jumla), tahlil so'ralganda batafsilroq javob bering
 - Markdown ishlatmang, oddiy matn`;
 
   const history = [
