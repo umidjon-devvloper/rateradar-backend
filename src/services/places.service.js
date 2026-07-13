@@ -226,6 +226,25 @@ export async function searchNearby(coords, radiusKm = 2) {
       console.warn('Google Places nearby xato:', describeAxiosError(err));
     }
   }
+
+  // 2) SerpAPI google_maps — Places yo'q/ishlamasa. Pullik obuna bor,
+  //    sifati Places'ga yaqin (nom, koordinata, reyting, sharh soni).
+  //    Natijalar radius bo'yicha filtrlaydi, topilsa OSM'ga tushmaymiz.
+  try {
+    const serp = await serpMapsHotelSearch('', '', { lat, lng });
+    const within = serp
+      .map((h) => ({
+        ...h,
+        distanceKm: Number.isFinite(h.lat) && Number.isFinite(h.lng)
+          ? distanceKm(lat, lng, h.lat, h.lng)
+          : undefined,
+      }))
+      .filter((h) => !Number.isFinite(h.distanceKm) || h.distanceKm <= radiusKm);
+    if (within.length) return within;
+  } catch (err) {
+    console.warn('SerpAPI maps nearby xato:', err.message);
+  }
+
   return await osmNearby(lat, lng, radiusKm);
 }
 
