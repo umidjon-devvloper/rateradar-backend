@@ -99,7 +99,12 @@ function normalize(engine, raw, source) {
 
   // google_maps → atrofdagi joylar
   if (engine === "google_maps") {
-    const places = raw.local_results || raw.places_results || raw.results || raw.places || [];
+    let places = raw.local_results || raw.places_results || raw.results || raw.places || [];
+    // So'rov aniq BITTA joyga mos kelsa, SerpAPI ro'yxat o'rniga yakka
+    // `place_results` obyektini qaytaradi — uni ham ro'yxatga o'giramiz.
+    if (!places.length && raw.place_results) {
+      places = Array.isArray(raw.place_results) ? raw.place_results : [raw.place_results];
+    }
     return {
       type: "maps",
       places: places.map((p) => ({
