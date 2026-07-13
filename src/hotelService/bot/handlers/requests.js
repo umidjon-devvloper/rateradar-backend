@@ -80,12 +80,19 @@ const setupRequestHandlers = (bot) => {
         if (chatId === clickedChatId) continue; // bosilgan xabar allaqachon yangilandi
         const isGroupChat = chatId < 0;
         const isAcceptorPrivate = chatId === telegramId;
+        const isAdminChat = hotel?.admin_telegram_id && chatId === hotel.admin_telegram_id;
+        let text;
+        if (isAcceptorPrivate) {
+          text = m.accepted(request.room_number, request.service_id?.name || "") + `\n👤 ${staffName}`;
+        } else if (isAdminChat) {
+          // Admin nusxasida xona/xizmat ma'lumoti saqlanib qolsin
+          text = `👑 ${m.takenByOther(staffName)}\n🏠 ${request.room_number} · 🛎 ${request.service_id?.name || ""}`;
+        } else {
+          text = m.takenByOther(staffName);
+        }
         try {
           await bot.telegram.editMessageText(
-            chatId, msgId, null,
-            isAcceptorPrivate
-              ? m.accepted(request.room_number, request.service_id?.name || "") + `\n👤 ${staffName}`
-              : m.takenByOther(staffName),
+            chatId, msgId, null, text,
             {
               parse_mode: "HTML",
               reply_markup: (isGroupChat || isAcceptorPrivate)

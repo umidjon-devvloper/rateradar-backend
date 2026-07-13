@@ -31,6 +31,8 @@ const requestSchema = new mongoose.Schema({
   is_timeout_notified:  { type: Boolean, default: false },
   // Oxirgi "qabul qilinmadi" eslatmasi yuborilgan vaqt (takror eslatma uchun)
   last_timeout_notified_at: { type: Date, default: null },
+  // "Qabul qilindi lekin bajarilmadi" ogohlantirishi yuborilgan vaqt (admin)
+  accepted_overdue_notified_at: { type: Date, default: null },
 
   created_at:   { type: Date, default: Date.now },
   accepted_at:  { type: Date, default: null },

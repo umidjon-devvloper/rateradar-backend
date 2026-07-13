@@ -210,8 +210,8 @@ const sendToStaff = async (request, service, hotel) => {
       service_ids: service._id,
     });
 
-    // Xodim ham, ulangan guruh ham bo'lmasa — yuboradigan joy yo'q.
-    if (staffList.length === 0 && !hotel.group_chat_id) return;
+    // Xodim ham, guruh ham, admin ham bo'lmasa — yuboradigan joy yo'q.
+    if (staffList.length === 0 && !hotel.group_chat_id && !hotel.admin_telegram_id) return;
 
     const m = getMsg(hotel.language);
     const time = new Date().toLocaleTimeString("en-GB", {
@@ -254,6 +254,24 @@ const sendToStaff = async (request, service, hotel) => {
           await Hotel.updateOne(
             { hotel_id: hotel.hotel_id },
             { $set: { group_chat_id: null, group_title: "" } }
+          ).catch(() => {});
+        }
+      }
+    }
+
+    // ADMINga ham yuboramiz (agar xodim sifatida allaqachon olgan bo'lmasa) —
+    // tugmasiz, kuzatuv nusxasi. msg_ids'da turgani uchun qabul/bajarildi
+    // holatlari uning xabarida ham avtomatik yangilanadi.
+    if (hotel.admin_telegram_id && !msgIds[hotel.admin_telegram_id.toString()]) {
+      try {
+        const sent = await bot.telegram.sendMessage(hotel.admin_telegram_id, `👑 ${text}`);
+        msgIds[hotel.admin_telegram_id.toString()] = sent.message_id;
+      } catch (err) {
+        console.error(`Admin ${hotel.admin_telegram_id} ga xabar yuborilmadi:`, err.message);
+        if (/blocked|chat not found|deactivated/i.test(err.message)) {
+          await Hotel.updateOne(
+            { hotel_id: hotel.hotel_id },
+            { $set: { admin_telegram_id: null, admin_name: "" } }
           ).catch(() => {});
         }
       }

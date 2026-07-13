@@ -30,6 +30,12 @@ const hotelSchema = new mongoose.Schema({
   group_chat_id: { type: Number, default: null },
   group_title:   { type: String, default: "" },
 
+  // ADMIN shaxsiy Telegram'i: bot bilan shaxsiy chatda /ulash inv_XXXX
+  // yuborilsa ulanadi. Unga barcha buyurtmalar + nazorat ogohlantirishlari
+  // (5 daqiqada olinmadi / 2.5 soatda bajarilmadi) keladi.
+  admin_telegram_id: { type: Number, default: null },
+  admin_name:        { type: String, default: "" },
+
   // Mehmon webapp sahifasi dizayni (admin o'zgartiradi)
   branding: {
     theme:        { type: String, default: "blue" },     // tayyor mavzu kaliti

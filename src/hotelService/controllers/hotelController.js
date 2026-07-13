@@ -89,9 +89,11 @@ const getMe = async (req, res) => {
     language: req.hotel.language, subscription: req.hotel.subscription,
     branding: req.hotel.branding || {},
     invite_code: req.hotel.invite_code,
-    // Telegram guruh integratsiyasi holati (SettingsPage ko'rsatadi)
+    // Telegram guruh + admin integratsiyasi holati (SettingsPage ko'rsatadi)
     group_chat_id: req.hotel.group_chat_id || null,
     group_title:   req.hotel.group_title || "",
+    admin_telegram_id: req.hotel.admin_telegram_id || null,
+    admin_name:        req.hotel.admin_name || "",
     bot_username:  process.env.BOT_USERNAME || "",
   });
 };
