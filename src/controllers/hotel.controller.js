@@ -1313,6 +1313,17 @@ export async function discoverNearbyHotels(req, res, next) {
       }
     }
 
+    // Markazdan masofa (km) — frontend "250 m" ko'rinishida ko'rsatadi.
+    const toRad = (d) => (d * Math.PI) / 180;
+    const distKm = (aLat, aLng, bLat, bLng) => {
+      const R = 6371;
+      const dLat = toRad(bLat - aLat);
+      const dLng = toRad(bLng - aLng);
+      const s = Math.sin(dLat / 2) ** 2 +
+        Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+    };
+
     const results = nearby.map((h) => ({
       placeId: h.placeId || '',
       osmId: h.osmId || '',
@@ -1323,6 +1334,11 @@ export async function discoverNearbyHotels(req, res, next) {
       rating: h.rating || 0,
       reviewCount: h.reviews || 0,
       source: h.source,
+      distanceKm: Number.isFinite(h.distanceKm)
+        ? h.distanceKm
+        : (Number.isFinite(h.lat) && Number.isFinite(h.lng)
+          ? Math.round(distKm(lat, lng, h.lat, h.lng) * 100) / 100
+          : undefined),
       isOwn: myHotel && h.name?.trim().toLowerCase() === myHotel.name?.trim().toLowerCase(),
       isAdded: existingPlaceIds.has(h.placeId) ||
         existingNames.has((h.name || '').trim().toLowerCase()),
