@@ -457,8 +457,14 @@ async function serpMapsHotelSearch(query, countryCode = '', cityContext = {}) {
         ...(ll && { ll }),
       });
 
-      const places = result.places || [];
+      let places = result.places || [];
       if (!places.length) continue;
+
+      // Turar joy bo'lmagan joylarni (obidalar, aeroport, restoran) chiqarib
+      // tashlaymiz. Google type bermagan yozuvlar saqlanadi (ehtiyotkorlik).
+      const LODGING_RE = /hotel|hostel|guest|inn|lodg|motel|resort|bed *&? *breakfast|b&b|apartment|villa/i;
+      const typed = places.filter((p) => !p.placeType || LODGING_RE.test(p.placeType));
+      if (typed.length) places = typed;
 
       return places
         .map((p) => ({

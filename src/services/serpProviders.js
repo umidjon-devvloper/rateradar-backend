@@ -112,6 +112,9 @@ function normalize(engine, raw, source) {
         address: p.address || p.fullAddress,
         rating: p.rating || p.reviewsRating,
         reviews: p.reviews || p.reviewsCount,
+        // Joy turi (Hotel, Tourist attraction, Airport...) — hotel bo'lmagan
+        // joylarni (obidalar, aeroport) filtrlash uchun.
+        placeType: p.type || (Array.isArray(p.types) ? p.types[0] : "") || "",
         coords: p.gps_coordinates || p.coords || {
           latitude: p.latitude,
           longitude: p.longitude,
