@@ -21,6 +21,8 @@ const serviceSchema = new mongoose.Schema({
   name:      { type: String, required: true },
   icon:      { type: String, default: "🛎" },
   color:     { type: String, default: "#2563eb" },
+  // Fon rasmi (TV plitkasi va mehmon sahifasida chiroyli ko'rinish uchun)
+  image_url: { type: String, default: "" },
   is_active: { type: Boolean, default: true },
 
   // Xodim shu xizmat uchun ro'yxatdan o'tishi uchun unikal kod

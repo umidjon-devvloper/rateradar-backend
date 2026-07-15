@@ -235,13 +235,14 @@ const cleanItems = (items) => (items || [])
 
 const createService = async (req, res) => {
   try {
-    const { name, icon, sub_options, items } = req.body;
+    const { name, icon, sub_options, items, image_url } = req.body;
     if (!name) return res.status(400).json({ message: "Xizmat nomi majburiy" });
 
     const cleanSubs = (sub_options || []).map(({ name: n }) => ({ name: n }));
     const service = await Service.create({
       hotel_id: req.hotelId, name,
       icon: icon || "🛎",
+      image_url: String(image_url || ""),
       sub_options: cleanSubs,
       items: cleanItems(items),
     });

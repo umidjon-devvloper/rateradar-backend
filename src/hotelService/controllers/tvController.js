@@ -2,6 +2,7 @@ const { nanoid } = require("nanoid");
 const TvDevice = require("../models/TvDevice");
 const Hotel = require("../models/Hotel");
 const Service = require("../models/Service");
+const { translate } = require("../services/translationService");
 
 const PAIR_CODE_TTL_MS = 15 * 60 * 1000; // kod 15 daqiqa yashaydi
 const ONLINE_WINDOW_MS = 6 * 60 * 1000;  // 6 daqiqada ko'ringan = online
@@ -101,23 +102,43 @@ const tvContent = async (req, res) => {
       });
     }
 
-    const services = await Service.find({ hotel_id: hotel.hotel_id, is_active: true })
-      .select("name icon items")
-      .lean();
+    // Til: TV pultidan tanlangan til (?lang=ja) — xizmat nomlari tarjima
+    // qilinadi (mehmon sahifasidagi kabi, translations keshi bilan).
+    const guestLang = String(req.query.lang || "").slice(0, 5) || null;
+    const hotelLang = hotel.language;
+
+    const services = await Service.find({ hotel_id: hotel.hotel_id, is_active: true });
+
+    const mapped = await Promise.all(services.map(async (svc) => {
+      let displayName = svc.name;
+      if (guestLang && guestLang !== hotelLang) {
+        let tName = svc.translations?.get?.(guestLang);
+        if (!tName) {
+          try {
+            tName = await translate(svc.name, hotelLang, guestLang);
+            svc.translations.set(guestLang, tName);
+            await svc.save();
+          } catch { tName = svc.name; }
+        }
+        displayName = tName || svc.name;
+      }
+      return {
+        name: displayName,
+        icon: svc.icon || "🛎",
+        image_url: svc.image_url || "",
+        items_count: (svc.items || []).filter((i) => i.is_active !== false).length,
+      };
+    }));
 
     res.json({
       locked: false,
       hotel_id: hotel.hotel_id,
       hotel_name: hotel.hotel_name,
-      language: hotel.language,
+      language: hotelLang,
       branding: hotel.branding || {},
       room_number: device.room_number || "",
       device_name: device.name || "TV",
-      services: services.map((s) => ({
-        name: s.name,
-        icon: s.icon || "🛎",
-        items_count: (s.items || []).filter((i) => i.is_active !== false).length,
-      })),
+      services: mapped,
     });
   } catch (err) {
     console.error("tvContent:", err.message);
