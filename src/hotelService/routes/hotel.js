@@ -35,4 +35,13 @@ router.get("/requests", getRequests);
 router.get("/reports",  getReports);
 router.get("/reviews",  getReviews);
 
+// TV qurilmalar (Android TV kiosk) — pair, ro'yxat, tahrirlash, uzish
+const {
+  pairDevice, listDevices, updateDevice, revokeDevice,
+} = require("../controllers/tvController");
+router.post("/tv-devices/pair",  pairDevice);
+router.get("/tv-devices",        listDevices);
+router.put("/tv-devices/:id",    updateDevice);
+router.delete("/tv-devices/:id", revokeDevice);
+
 module.exports = router;

@@ -15,6 +15,7 @@
 
 const guestRoutes = require("./routes/guest");
 const hotelRoutes = require("./routes/hotel");
+const tvRoutes = require("./routes/tv");
 const socketManager = require("./socket");
 const { initBot } = require("./bot");
 const { startTimeoutJob } = require("./jobs/timeoutJob");
@@ -22,6 +23,7 @@ const { startTimeoutJob } = require("./jobs/timeoutJob");
 function mountRoutes(app) {
   app.use("/api/hotel-service/guest", guestRoutes);
   app.use("/api/hotel-service/hotel", hotelRoutes);
+  app.use("/api/hotel-service/tv", tvRoutes);
   console.log("✅ Hotel Service marshrutlari ulandi (/api/hotel-service/*)");
 }
 
