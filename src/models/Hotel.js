@@ -75,6 +75,10 @@ const hotelSchema = new mongoose.Schema(
     // bosilganda yoki kesh bo'lmaganda qaytadan generatsiya qilinadi.
     aiPriceRecs: { type: Object, default: null },
     aiPriceRecsAt: { type: Date, default: null },
+    // HAR BIR OTA kanali uchun AI narx tavsiyasi (dashboard kartasi) —
+    // { summary, channels: [{channel, currentPrice, suggestedPrice, ...}] }
+    aiOtaAdvice: { type: Object, default: null },
+    aiOtaAdviceAt: { type: Date, default: null },
     roomTypes: {
       type: [
         {

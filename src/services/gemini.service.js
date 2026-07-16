@@ -81,6 +81,61 @@ Faqat JSON qaytar (${langName} tilida):
   }
 }
 
+/**
+ * HAR BIR OTA KANALI uchun narx tavsiyasi — o'z narxi va raqiblarning AYNAN
+ * SHU KANALDAGI narxlari asosida. Statistika (min/max/median/rank) serverda
+ * hisoblab berilgan; AI faqat suggestedPrice + qisqa sabab qaytaradi.
+ *
+ * @param channels [{channel, currentPrice, compPrices:[{name,price}], min, max, median, rank, total}]
+ * @returns {summary, channels:[{channel, suggestedPrice, action, reason}]}
+ */
+export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, channels, lang = 'uz' }) {
+  const m = getModel();
+  if (!m) return { summary: '', channels: [] };
+
+  const langName = lang === 'uz' ? "o'zbek" : lang === 'ru' ? 'rus' : 'ingliz';
+  const chText = channels.map((c) => {
+    const comps = c.compPrices.map((p) => `${p.name}: $${p.price}`).join(', ');
+    return `KANAL: ${c.channel}
+  Mening narxim: ${c.currentPrice > 0 ? `$${c.currentPrice}` : "yo'q"}
+  Raqiblar shu kanalda: ${comps || "yo'q"}
+  Statistika: min $${c.min}, max $${c.max}, median $${c.median}${c.currentPrice > 0 ? `, mening o'rnim ${c.rank}/${c.total}` : ''}`;
+  }).join('\n\n');
+
+  const prompt = `Sen hotel revenue manager mutaxassisisan. Quyida mehmonxonaning HAR BIR OTA kanalidagi o'z narxi va raqiblarning AYNAN O'SHA KANALDAGI narxlari berilgan. Har kanal uchun alohida, aniq narx tavsiya qil.
+
+Mehmonxona: ${hotelName}${stars ? ` (${stars}★)` : ''}${rating ? `, reyting ${rating}` : ''}
+
+${chText}
+
+Qoidalar:
+- Har kanal uchun suggestedPrice — butun son (USD). Raqiblar oralig'iga va mehmonxona darajasiga mos bo'lsin, keskin sakrash qilma (bir qadamda maksimal ~40% o'zgarish).
+- action: "raise" (ko'tarish) | "lower" (tushirish) | "keep" (saqlash).
+- reason: 1-2 jumla, ANIQ raqamlar bilan ("raqiblar $104 atrofida, $99 → $103 qiling" uslubida).
+
+Faqat JSON qaytar (matnlar ${langName} tilida):
+{
+  "summary": "Umumiy xulosa 1-2 jumla",
+  "channels": [
+    { "channel": "kanal nomi (kiritilganidek)", "suggestedPrice": son, "action": "raise|lower|keep", "reason": "..." }
+  ]
+}`;
+
+  try {
+    const r = await m.generateContent(prompt);
+    recordApiUsage('gemini', true);
+    const parsed = JSON.parse(r.response.text());
+    return {
+      summary: parsed.summary || '',
+      channels: Array.isArray(parsed.channels) ? parsed.channels : [],
+    };
+  } catch (err) {
+    recordApiUsage('gemini', false, err);
+    console.error('Gemini getOtaChannelAdvice xato:', err.message);
+    return { summary: '', channels: [] };
+  }
+}
+
 export async function summarizeReviews(reviews, lang = 'uz') {
   const m = getModel();
   if (!m) return { strengths: [], weaknesses: [], summary: '', recommendedActions: [] };

@@ -8,6 +8,7 @@ import {
   aiAnalyzeSingleReview,
   aiChatSupport,
   aiAssistantChat,
+  aiOtaAdvice,
 } from '../controllers/ai.controller.js';
 
 const router = Router();
@@ -120,5 +121,22 @@ router.post('/chat', aiChatSupport);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/assistant-chat', requireAuth, resolveHotel, aiAssistantChat);
+
+/**
+ * @openapi
+ * /ai/ota-advice:
+ *   get:
+ *     tags: [AI]
+ *     summary: Har bir OTA kanali uchun AI narx tavsiyasi (raqiblar tahlili bilan, 6h kesh)
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *       - in: query
+ *         name: refresh
+ *         schema: { type: boolean }
+ *     responses:
+ *       200: { description: "{ summary, channels:[{channel, currentPrice, suggestedPrice, delta, action, reason, stats}] }" }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.get('/ota-advice', requireAuth, resolveHotel, aiOtaAdvice);
 
 export default router;

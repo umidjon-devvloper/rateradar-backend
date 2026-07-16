@@ -8,7 +8,8 @@ import {
   summarizeReviews,
   isAIEnabled,
 } from "../services/openai.service.js";
-import { chatSupport, assistantChat } from "../services/gemini.service.js";
+import { chatSupport, assistantChat, getOtaChannelAdvice, isGeminiEnabled } from "../services/gemini.service.js";
+import PriceSnapshot from "../models/PriceSnapshot.js";
 
 export function getAIStatus(req, res) {
   res.json({ enabled: isAIEnabled(), model: "gpt-4o-mini" });
@@ -175,6 +176,143 @@ export async function aiAnalyzeSingleReview(req, res, next) {
 
     const result = await analyzeReview(text.trim(), lang);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// OTA nomini bir xil kalitga keltirish ("Booking.com" == "bookingcom")
+const otaKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+// Ko'rsatiladigan standart nomlar
+const OTA_DISPLAY = {
+  bookingcom: 'Booking.com', booking: 'Booking.com', agoda: 'Agoda',
+  expedia: 'Expedia', hotelscom: 'Hotels.com', tripcom: 'Trip.com',
+  google: 'Google', priceline: 'Priceline', viocom: 'Vio.com',
+};
+
+/**
+ * GET /ai/ota-advice — HAR BIR OTA KANALI uchun AI narx tavsiyasi.
+ * Own va raqib narxlari PriceSnapshot'dan (oxirgi 7 kun, har kanal bo'yicha
+ * eng so'nggisi) olinadi, statistika serverda hisoblanadi, Gemini har kanalga
+ * suggestedPrice + sabab beradi. 6 soat keshlanadi; ?refresh=true — majburiy.
+ */
+const OTA_ADVICE_FRESH_MS = 6 * 3600_000;
+
+export async function aiOtaAdvice(req, res, next) {
+  try {
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    if (!isGeminiEnabled()) return res.status(503).json({ error: 'Gemini API kaliti sozlanmagan' });
+
+    const refresh = req.query.refresh === 'true';
+    const isFresh = hotel.aiOtaAdviceAt &&
+      Date.now() - new Date(hotel.aiOtaAdviceAt).getTime() < OTA_ADVICE_FRESH_MS;
+    if (!refresh && isFresh && hotel.aiOtaAdvice?.channels?.length) {
+      return res.json({ ...hotel.aiOtaAdvice, asOf: hotel.aiOtaAdviceAt, cached: true });
+    }
+
+    // ── Oxirgi 7 kunlik snapshotlardan har (target, kanal) ning eng so'nggisi ──
+    const since = new Date(Date.now() - 7 * 86400_000);
+    const snaps = await PriceSnapshot.aggregate([
+      { $match: { ownerHotelId: hotel._id, snapshotAt: { $gte: since }, price: { $gt: 0 } } },
+      { $sort: { snapshotAt: -1 } },
+      {
+        $group: {
+          _id: { targetType: '$targetType', targetId: '$targetId', ota: '$ota' },
+          price: { $first: '$price' },
+        },
+      },
+    ]);
+
+    // Raqib nomlari (kartada "Hotel X: $104" deb chiqarish uchun)
+    const compIds = [...new Set(
+      snaps.filter((s) => s._id.targetType === 'competitor').map((s) => String(s._id.targetId))
+    )];
+    const comps = await Competitor.find({ _id: { $in: compIds } }).select('name').lean();
+    const compName = new Map(comps.map((c) => [String(c._id), c.name]));
+
+    // Kanal bo'yicha guruhlash
+    const byChannel = new Map(); // key → { channel, currentPrice, compPrices: [{name, price}] }
+    for (const s of snaps) {
+      const key = otaKey(s._id.ota);
+      if (!key) continue;
+      const display = OTA_DISPLAY[key] || s._id.ota;
+      if (!byChannel.has(key)) byChannel.set(key, { channel: display, currentPrice: 0, compPrices: [] });
+      const ch = byChannel.get(key);
+      if (s._id.targetType === 'own') {
+        if (!ch.currentPrice) ch.currentPrice = Math.round(s.price);
+      } else {
+        const nm = compName.get(String(s._id.targetId));
+        // Bitta raqibning bitta kanalda faqat eng so'nggi narxi
+        if (nm && !ch.compPrices.some((p) => p.name === nm)) {
+          ch.compPrices.push({ name: nm, price: Math.round(s.price) });
+        }
+      }
+    }
+
+    // Statistika — faqat raqib narxi bor kanallar tahlilga kiradi
+    const channels = [...byChannel.values()]
+      .filter((c) => c.compPrices.length > 0)
+      .map((c) => {
+        const prices = c.compPrices.map((p) => p.price).sort((a, b) => a - b);
+        const mid = Math.floor(prices.length / 2);
+        const median = prices.length % 2 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
+        const total = prices.length + (c.currentPrice > 0 ? 1 : 0);
+        const rank = c.currentPrice > 0
+          ? prices.filter((p) => p < c.currentPrice).length + 1
+          : null;
+        return {
+          ...c,
+          min: prices[0],
+          max: prices[prices.length - 1],
+          median: Math.round(median * 10) / 10,
+          rank,
+          total,
+        };
+      });
+
+    if (!channels.length) {
+      return res.json({
+        summary: '', channels: [], asOf: null, cached: false,
+        reason: 'no_data',
+      });
+    }
+
+    const lang = req.query.lang || 'uz';
+    const ai = await getOtaChannelAdvice({
+      hotelName: hotel.name,
+      stars: hotel.stars || 0,
+      rating: hotel.rating || 0,
+      channels,
+      lang,
+    });
+
+    // AI javobini server statistikasi bilan birlashtiramiz
+    const aiByKey = new Map((ai.channels || []).map((c) => [otaKey(c.channel), c]));
+    const merged = channels.map((c) => {
+      const a = aiByKey.get(otaKey(c.channel)) || {};
+      const suggested = Number(a.suggestedPrice) > 0 ? Math.round(a.suggestedPrice) : 0;
+      return {
+        channel: c.channel,
+        currentPrice: c.currentPrice,
+        suggestedPrice: suggested,
+        delta: c.currentPrice > 0 && suggested ? suggested - c.currentPrice : 0,
+        action: ['raise', 'lower', 'keep'].includes(a.action)
+          ? a.action
+          : suggested && c.currentPrice ? (suggested > c.currentPrice ? 'raise' : suggested < c.currentPrice ? 'lower' : 'keep') : 'keep',
+        reason: a.reason || '',
+        stats: { min: c.min, max: c.max, median: c.median, rank: c.rank, total: c.total },
+      };
+    }).filter((c) => c.suggestedPrice > 0 || c.currentPrice > 0);
+
+    const result = { summary: ai.summary || '', channels: merged, engine: 'gemini' };
+    const now = new Date();
+    await Hotel.updateOne(
+      { _id: hotel._id },
+      { $set: { aiOtaAdvice: result, aiOtaAdviceAt: now } },
+    ).catch(() => {});
+
+    res.json({ ...result, asOf: now, cached: false });
   } catch (err) {
     next(err);
   }
