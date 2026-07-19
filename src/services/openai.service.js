@@ -67,6 +67,10 @@ export async function getPriceRecommendations({
   otaChannels = [],
   roomTypes = [],
   reviewsDigest = [],
+  city = '',
+  country = '',
+  todayStr = '',
+  hsStats = null,
   lang = 'uz',
 }) {
   const langName = lang === 'uz' ? "o'zbek" : lang === 'ru' ? 'rus' : 'ingliz';
@@ -86,50 +90,54 @@ export async function getPriceRecommendations({
     ? reviewsDigest.map((r) => `[${r.rating}★ ${r.sentiment || ''}] ${r.text}`).join('\n')
     : 'Yo\'q';
 
-  const prompt = `Sen hotel revenue manager va mehmonxona biznesi maslahatchisisan. Mehmonxonaning BARCHA ma'lumotiga (narx, raqiblar, kategoriya reytinglari, OTA kanallar, xona narxlari, sharhlar) qarab 3-5 ta amaliy tavsiya ber.
+  // Hotel-service statistikasi matni (ulangan bo'lsa real raqamlar)
+  const hsText = hsStats
+    ? `ULANGAN. Oxirgi 30 kun statistikasi:
+  - Jami buyurtmalar: ${hsStats.total} (bajarilgan: ${hsStats.completed}, kutilmoqda: ${hsStats.pending})
+  - O'rtacha bajarish vaqti: ${hsStats.avgCompleteMin ? `${hsStats.avgCompleteMin} daqiqa` : "ma'lumot yo'q"}
+  - Eng ko'p so'ralgan xizmatlar: ${hsStats.topServices?.length ? hsStats.topServices.map((s) => `${s.name} (${s.count})`).join(', ') : "yo'q"}`
+    : 'ULANMAGAN';
 
-Mening hotel: ${myHotel}
-Mening narx: $${myPrice}
-Bozor o'rtacha: $${marketAvg}
-Yulduz: ${stars}★ | Reyting: ${rating} (${reviewCount} sharh)
+  const prompt = `Sen tajribali MEHMONXONA MARKETOLOGI va operatsion maslahatchisisan. Quyidagi mehmonxona uchun AYNAN 5 ta bo'limda, har biriga bittadan chuqur amaliy tavsiya yoz. Bo'limlar tartibi va "section" kaliti QAT'IY:
+
+1. section="city_season" — SHAHAR VA MAVSUM TAHLILI. Mehmonxona ${city || 'shahri'}${country ? `, ${country}` : ''} da joylashgan, bugungi sana: ${todayStr}. Kelgusi 3-6 oyda shu shahar/mintaqada turizmga ta'sir qiladigan mavsumiy o'zgarishlar, bayramlar, festival va tadbirlarni (bilganlaring asosida) tahlil qil: qachon talab ko'tariladi, qachon pasayadi, qaysi oylarga e'tibor berish kerak. Narx RAQAMI tavsiya QILMA (u boshqa bo'limda) — faqat qachon qanday harakat qilish strategiyasini ayt.
+2. section="rating" — REYTING YAXSHILASH. Kategoriya reytinglaridan ENG PAST 1-2 subscore'ni nomma-nom aniqla va aynan ularni ko'tarish uchun aniq, bajarilishi oson qadamlar ber.
+3. section="service" — MEHMONXONA XIZMATI TAHLILI. Hotel Service moduli (QR buyurtma + Telegram): ${hotelServiceConnected ? 'statistikani tahlil qilib, qaysi xizmat sekin/kam ishlayotgani va nimani yaxshilash kerakligini aniq ayt.' : "ULANMAGAN — ulashning aniq foydasini tushuntir va action maydonini \"connect_hotel_service\" qilib belgila."}
+4. section="rooms" — XONA NARXLARI VA UPSELL. Xona turlari narxlarini solishtirib, qaysi xonani qancha qilib qo'yish va qanday upsell (transfer, nonushta, kech chiqish...) qo'shish kerakligini currentPrice/suggestedPrice bilan ber.
+5. section="reviews" — SHARHLARDAGI SHIKOYATLAR. Takroriy shikoyat mavzularini aniqlab, ularni bartaraf etish rejasini ber.
+
+MA'LUMOTLAR:
+Mehmonxona: ${myHotel} (${stars}★, reyting ${rating}, ${reviewCount} sharh)
+Joylashuv: ${city || "noma'lum"}${country ? `, ${country}` : ''} | Bugun: ${todayStr}
+Mening narx: $${myPrice} | Bozor o'rtacha: $${marketAvg}
 Raqiblar:
 ${compList}
-
-Kategoriya reytinglari (Booking subscore, 10 balli): ${catText}
+Kategoriya reytinglari (10 balli): ${catText}
 Faol OTA kanallar: ${otaText}
-Xona turlari va narxlari:
+Xona turlari:
 ${roomText}
-Oxirgi sharhlar (mazmuni):
+Oxirgi sharhlar:
 ${reviewText}
+Hotel Service moduli: ${hsText}
 
-Mehmonxona-xizmati moduli (RateRadar Hotel Service — mehmonlar QR orqali xizmat buyuradi, so'rovlar xodimlarga Telegram'da boradi) holati: ${hotelServiceConnected ? 'ULANGAN' : 'ULANMAGAN'}
+QAT'IY TIL QOIDASI: javobning BARCHA matnlari (title, description, expectedImpact, summary) FAQAT ${langName.toUpperCase()} tilida bo'lsin. Boshqa til aralashtirma.
 
-Tavsiyalar quyidagilarni qamrab olsin (faqat narx emas — BARCHA sahifadan):
-- Narx optimizatsiyasi (raqiblar va bozorga nisbatan) — currentPrice/suggestedPrice bilan.
-- Kategoriya reytinglari: ENG PAST subscore'ni (masalan tozalik yoki xizmat) aniqlab, uni yaxshilashga aniq maslahat.
-- OTA kanallar qamrovi: kam kanaldasiz yoki muhim kanal (Booking/Agoda/Expedia) yo'q bo'lsa — qo'shishni tavsiya qil.
-- Xona narxlari: xona turlariga qarab narx/upsell strategiyasi.
-- Sharhlardagi TAKRORIY shikoyatlarni aniqlab, ularni bartaraf etishga amaliy maslahat.
-- Qo'shimcha daromad: upsell (transfer, nonushta, kech chiqish, ekskursiya) — reyting va bozorga mos.
-${hotelServiceConnected
-  ? '- Mehmonxona-xizmati ULANGAN: undan qanday yaxshiroq foydalanishni tavsiya qil.'
-  : '- Mehmonxona-xizmati ULANMAGAN bo\'lgani uchun ALBATTA bitta tavsiya mehmonxona-xizmati modulini ulashga oid bo\'lsin (mehmon tajribasi va daromadni oshiradi). O\'sha tavsiyaning "action" maydonini "connect_hotel_service" qilib belgila.'}
-
-Faqat JSON qaytar (${langName} tilida):
+Faqat JSON qaytar:
 {
   "recommendations": [
     {
       "priority": 1,
+      "section": "city_season | rating | service | rooms | reviews",
       "title": "Qisqa amal sarlavhasi",
-      "description": "Batafsil sabab va tushuntirish",
-      "platform": "Booking.com yoki Agoda yoki Hammasi yoki Xizmatlar",
+      "description": "Batafsil, raqamlar bilan tushuntirish (3-5 jumla)",
+      "platform": "tegishli bo'lsa kanal nomi, bo'lmasa bo'sh",
       "action": "price | upsell | connect_hotel_service | other",
       "currentPrice": 0,
       "suggestedPrice": 0,
-      "expectedImpact": "Kutilgan effekt"
+      "expectedImpact": "Kutilgan effekt (qisqa)"
     }
   ],
-  "summary": "Umumiy bozor pozitsiyasi va imkoniyatlar haqida 1-2 jumla"
+  "summary": "Marketolog nigohi bilan umumiy xulosa 1-2 jumla"
 }`;
 
   try {

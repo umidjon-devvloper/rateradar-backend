@@ -24,9 +24,12 @@ export async function aiPriceRecommendations(req, res, next) {
     if (!hotel) return res.status(404).json({ error: "Hotel topilmadi" });
 
     // Kesh — token tejash uchun. refresh=true bo'lmasa va kesh mavjud bo'lsa,
-    // AI'ga qayta so'rov yubormaymiz (foydalanuvchi "Yangilash" bosgandagina).
+    // AI'ga qayta so'rov yubormaymiz. MUHIM: kesh TILI ham mos bo'lishi kerak —
+    // sayt tili o'zgarsa (uz→ru), eski tildagi kesh ishlatilmaydi.
     const refresh = req.query.refresh === "true";
-    if (!refresh && hotel.aiPriceRecs?.recommendations?.length) {
+    const reqLang = req.query.lang || "uz";
+    if (!refresh && hotel.aiPriceRecs?.recommendations?.length &&
+        (hotel.aiPriceRecs.lang || "uz") === reqLang) {
       return res.json({ ...hotel.aiPriceRecs, cached: true, asOf: hotel.aiPriceRecsAt });
     }
 
@@ -54,12 +57,46 @@ export async function aiPriceRecommendations(req, res, next) {
 
     // Mehmonxona-xizmati moduliga ulanganmi? — hs_hotels kolleksiyasida
     // hotel_id = RateRadar hotel _id (SSO birinchi kirishda yaratiladi).
+    // Ulangan bo'lsa oxirgi 30 kunlik REAL statistika ham yig'iladi —
+    // AI "service" bo'limi shu raqamlar asosida tahlil beradi.
     let hotelServiceConnected = false;
+    let hsStats = null;
     try {
+      const hsId = hotel._id.toString();
       const hs = await mongoose.connection.db
         .collection("hs_hotels")
-        .findOne({ hotel_id: hotel._id.toString() }, { projection: { _id: 1 } });
+        .findOne({ hotel_id: hsId }, { projection: { _id: 1 } });
       hotelServiceConnected = !!hs;
+
+      if (hotelServiceConnected) {
+        const since = new Date(Date.now() - 30 * 86400_000);
+        const reqCol = mongoose.connection.db.collection("hs_requests");
+        const [total, completed, pending, avgAgg, topAgg] = await Promise.all([
+          reqCol.countDocuments({ hotel_id: hsId, created_at: { $gte: since } }),
+          reqCol.countDocuments({ hotel_id: hsId, created_at: { $gte: since }, status: "completed" }),
+          reqCol.countDocuments({ hotel_id: hsId, created_at: { $gte: since }, status: "pending" }),
+          reqCol.aggregate([
+            { $match: { hotel_id: hsId, created_at: { $gte: since }, status: "completed", accepted_at: { $ne: null } } },
+            { $group: { _id: null, avgMin: { $avg: { $divide: [{ $subtract: ["$completed_at", "$accepted_at"] }, 60000] } } } },
+          ]).toArray(),
+          reqCol.aggregate([
+            { $match: { hotel_id: hsId, created_at: { $gte: since } } },
+            { $group: { _id: "$service_id", count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 3 },
+            { $lookup: { from: "hs_services", localField: "_id", foreignField: "_id", as: "svc" } },
+          ]).toArray(),
+        ]);
+        if (total > 0) {
+          hsStats = {
+            total,
+            completed,
+            pending,
+            avgCompleteMin: avgAgg[0]?.avgMin ? Math.round(avgAgg[0].avgMin) : null,
+            topServices: topAgg.map((t) => ({ name: t.svc?.[0]?.name || "?", count: t.count })),
+          };
+        }
+      }
     } catch {
       /* kolleksiya yo'q bo'lsa — ulanmagan deb hisoblaymiz */
     }
@@ -111,11 +148,16 @@ export async function aiPriceRecommendations(req, res, next) {
       otaChannels,
       roomTypes,
       reviewsDigest,
+      city: hotel.city || "",
+      country: hotel.country || "",
+      todayStr: new Date().toISOString().slice(0, 10),
+      hsStats,
       lang,
     });
 
-    // Natijani keshlaymiz (faqat haqiqiy tavsiya bo'lsa).
+    // Natijani keshlaymiz (faqat haqiqiy tavsiya bo'lsa) — tili bilan birga.
     if (result?.recommendations?.length) {
+      result.lang = lang;
       const now = new Date();
       await Hotel.updateOne(
         { _id: hotel._id },
@@ -205,9 +247,12 @@ export async function aiOtaAdvice(req, res, next) {
     if (!isGeminiEnabled()) return res.status(503).json({ error: 'Gemini API kaliti sozlanmagan' });
 
     const refresh = req.query.refresh === 'true';
+    const reqLang2 = req.query.lang || 'uz';
     const isFresh = hotel.aiOtaAdviceAt &&
       Date.now() - new Date(hotel.aiOtaAdviceAt).getTime() < OTA_ADVICE_FRESH_MS;
-    if (!refresh && isFresh && hotel.aiOtaAdvice?.channels?.length) {
+    // Kesh tili sayt tiliga mos bo'lsagina ishlatiladi
+    if (!refresh && isFresh && hotel.aiOtaAdvice?.channels?.length &&
+        (hotel.aiOtaAdvice.lang || 'uz') === reqLang2) {
       return res.json({ ...hotel.aiOtaAdvice, asOf: hotel.aiOtaAdviceAt, cached: true });
     }
 
@@ -305,7 +350,7 @@ export async function aiOtaAdvice(req, res, next) {
       };
     }).filter((c) => c.suggestedPrice > 0 || c.currentPrice > 0);
 
-    const result = { summary: ai.summary || '', channels: merged, engine: 'gemini' };
+    const result = { summary: ai.summary || '', channels: merged, engine: 'gemini', lang };
     const now = new Date();
     await Hotel.updateOne(
       { _id: hotel._id },
@@ -325,7 +370,7 @@ export async function aiOtaAdvice(req, res, next) {
  */
 export async function aiAssistantChat(req, res, next) {
   try {
-    const { messages } = req.body;
+    const { messages, lang: chatLang } = req.body;
     if (!Array.isArray(messages) || !messages.length) {
       return res.status(400).json({ error: "messages talab etiladi" });
     }
@@ -379,7 +424,7 @@ export async function aiAssistantChat(req, res, next) {
       context = parts.join('\n');
     }
 
-    const reply = await assistantChat(safe, context);
+    const reply = await assistantChat(safe, context, chatLang || 'uz');
     res.json({ reply });
   } catch (err) {
     next(err);

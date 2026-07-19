@@ -219,8 +219,9 @@ Qoidalar:
  * @param messages [{role:'user'|'assistant', content}] — oxirgisi yangi savol
  * @param context  string — hotel haqidagi qisqa ma'lumot (controller tayyorlaydi)
  */
-export async function assistantChat(messages, context = '') {
+export async function assistantChat(messages, context = '', lang = 'uz') {
   if (!env.GEMINI_API_KEY) return 'AI yordamchi hozircha sozlanmagan (GEMINI_API_KEY yo\'q).';
+  const langName = lang === 'uz' ? "o'zbek" : lang === 'ru' ? 'rus' : 'ingliz';
   // Yordamchi chat uchun alohida model konfiguratsiyasi — javoblar uzunroq
   // bo'lishi mumkin (sharh tahlili, reja tuzish), shuning uchun 1024 token.
   if (!genAI) genAI = new GoogleGenerativeAI(env.GEMINI_API_KEY);
@@ -235,7 +236,7 @@ Erkin gaplashadigan mavzularingiz: mehmonxona biznesi, narx strategiyasi (revenu
 
 ${context ? `FOYDALANUVCHINING MEHMONXONASI VA REAL MA'LUMOTLARI:\n${context}\n\nMUHIM: Yuqorida mehmonxonaning REAL sharhlari berilgan — "sharhlarni ko'ra olmayman" DEMANG. Sharhlar haqida so'ralsa, aynan shu berilgan sharhlarni tahlil qiling: nimadan mamnun, nimadan shikoyat, qaysi sharhga qanday javob berish kerak — konkret ayting.\n` : ''}
 Qoidalar:
-- Foydalanuvchi tilida javob bering (o'zbek/rus/ingliz)
+- STANDART JAVOB TILI: ${langName} (sayt tili). Foydalanuvchi boshqa tilda yozsa — o'sha tilga moslaning
 - Amaliy va aniq maslahat bering, raqamlar bilan gaplashing (narx, foiz, sana)
 - Oddiy savolga qisqa (3-5 jumla), tahlil so'ralganda batafsilroq javob bering
 - Markdown ishlatmang, oddiy matn`;
