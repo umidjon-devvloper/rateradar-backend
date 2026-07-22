@@ -23,6 +23,17 @@ const TIMEOUT = 90_000;
 
 export const hasScrapedoHotels = () => Boolean(env.SCRAPEDO_API_KEY);
 
+// ── SHAHAR LISTING KESHI (kredit tejash) ──────────────────────────────────
+// listing so'rovi butun shaharni (20 hotel) qaytaradi va 10 kredit yeydi.
+// Bir yangilashda o'z hotel + barcha raqiblar SHU BITTA listing'ni bo'lishadi
+// — har biriga alohida so'rov qilmaymiz. 15 daqiqa keshlanadi.
+const _cityCache = new Map(); // key → { data, ts }
+const CITY_TTL = 15 * 60 * 1000;
+
+function cityKey(city, checkIn, checkOut, cur, gl) {
+  return `${String(city).toLowerCase()}|${checkIn}|${checkOut}|${cur}|${gl}`;
+}
+
 function dateOffset(days) {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -91,38 +102,48 @@ async function sdoGet(url, params, attempt = 1) {
   }
 }
 
-/**
- * Hotel narx + OTA kanallar + reyting + kategoriya — SerpAPI shaklida.
- * @returns SerpAPI getSerpApiHotelData bilan bir xil obyekt yoki null.
- */
-export async function getScrapedoHotelData({ name, city = '', countryCode = '', currency = 'USD' }) {
-  if (!hasScrapedoHotels() || !name) return null;
+// Shahar listing'ini oladi — avval keshdan, bo'lmasa API'dan (10 kredit).
+async function getCityListing(city, countryCode, checkIn, checkOut, cur) {
+  const gl = (countryCode || 'us').toLowerCase();
+  const key = cityKey(city, checkIn, checkOut, cur, gl);
+  const hit = _cityCache.get(key);
+  if (hit && Date.now() - hit.ts < CITY_TTL) return hit.data;
 
-  const checkIn = dateOffset(1);
-  const checkOut = dateOffset(2);
-  const cur = /^[A-Z]{3}$/.test(currency) ? currency : 'USD';
-  const q = `${city || name} hotels`.trim(); // "Bukhara hotels" — eng ishonchli shakl
-
-  let listing;
   try {
-    listing = await sdoGet(LISTING, {
-      q,
-      check_in_date: checkIn,
-      check_out_date: checkOut,
-      currency: cur,
-      gl: (countryCode || 'us').toLowerCase(),
-      hl: 'en',
-      limit: 20,
+    const data = await sdoGet(LISTING, {
+      q: `${city} hotels`.trim(),
+      check_in_date: checkIn, check_out_date: checkOut,
+      currency: cur, gl, hl: 'en', limit: 20,
     });
     recordApiUsage('scrapedo', true, null, 'hotels_listing');
+    const props = Array.isArray(data?.properties) ? data.properties : [];
+    _cityCache.set(key, { data: props, ts: Date.now() });
+    return props;
   } catch (err) {
     recordApiUsage('scrapedo', false, err.message, 'hotels_listing');
     console.warn('Scrape.do hotels listing xato:', err.response?.status || '', err.message);
     return null;
   }
+}
 
-  const props = Array.isArray(listing?.properties) ? listing.properties : [];
-  if (!props.length) return null;
+/**
+ * Hotel narx + OTA kanallar + reyting — SerpAPI shaklida.
+ *
+ * @param opts.detail  true (default) = per-vendor OTA shelf (detail, +10 kredit).
+ *   false = faqat listing'dagi bazaviy narx (raqiblar uchun — kredit tejaydi,
+ *   detail so'rovi qilinmaydi).
+ * @returns SerpAPI getSerpApiHotelData bilan bir xil obyekt yoki null.
+ */
+export async function getScrapedoHotelData({ name, city = '', countryCode = '', currency = 'USD', detail = true }) {
+  if (!hasScrapedoHotels() || !name) return null;
+
+  const checkIn = dateOffset(1);
+  const checkOut = dateOffset(2);
+  const cur = /^[A-Z]{3}$/.test(currency) ? currency : 'USD';
+
+  // Shahar listing (keshlangan — bir yangilashda barcha hotel bo'lishadi)
+  const props = await getCityListing(city || name, countryCode, checkIn, checkOut, cur);
+  if (!props?.length) return null;
 
   const { best: match, score } = findBestMatch(name, props);
   // Nom umuman mos kelmasa (boshqa hotel) — ishonmaymiz.
@@ -145,8 +166,9 @@ export async function getScrapedoHotelData({ name, city = '', countryCode = '', 
     source: 'scrapedo',
   };
 
-  // ── Detail: per-vendor OTA narxlari ──
-  if (match.detail_token) {
+  // ── Detail: per-vendor OTA narxlari (faqat detail=true bo'lsa, +10 kredit) ──
+  // Raqiblar uchun detail=false — listing'dagi bazaviy narx yetadi (tejamkorlik).
+  if (detail && match.detail_token) {
     try {
       const detail = await sdoGet(DETAIL, {
         detail_token: match.detail_token,
