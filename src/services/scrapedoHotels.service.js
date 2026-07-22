@@ -68,12 +68,27 @@ function normalizeSourceName(s) {
 // baholari OLINMAYDI. Kategoriya reytinglari getMyCategoryRatings zanjirida
 // alohida, ishonchli manbalardan olinadi (Booking-direct subscore: 8.7, 9.1...).
 
-async function sdoGet(url, params) {
-  const r = await axios.get(url, {
-    params: { ...params, token: env.SCRAPEDO_API_KEY },
-    timeout: TIMEOUT,
-  });
-  return r.data;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Scrape.do 502/500 = O'TKINCHI xato (ularning hujjati: "Transient. Retry").
+// 3 martagacha qayta urinamiz — shusiz detail so'rovi ~1/3 hollarda yiqiladi.
+async function sdoGet(url, params, attempt = 1) {
+  const MAX = 3;
+  try {
+    const r = await axios.get(url, {
+      params: { ...params, token: env.SCRAPEDO_API_KEY },
+      timeout: TIMEOUT,
+    });
+    return r.data;
+  } catch (err) {
+    const status = err.response?.status;
+    const retriable = status === 502 || status === 500 || err.code === 'ECONNABORTED';
+    if (retriable && attempt < MAX) {
+      await sleep(800 * attempt); // 0.8s, 1.6s backoff
+      return sdoGet(url, params, attempt + 1);
+    }
+    throw err;
+  }
 }
 
 /**
