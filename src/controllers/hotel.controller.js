@@ -887,6 +887,21 @@ export async function getMyCategoryRatings(req, res, next) {
       } catch (err) { console.warn('Category ratings (scraper) xato:', err.message); }
     }
 
+    // 3) SCRAPE.DO fallback — SerpAPI ham, skreyper ham natija bermasa.
+    //    Booking sahifasining o'zidan kategoriya baholarini o'qiydi (1 kredit).
+    if (!data?.scores || !Object.keys(data.scores).length) {
+      try {
+        const { hasScrapeDo, getBookingIdentity } = await import('../services/scrapedo.service.js');
+        const bookingUrl = hotel.otaUrls?.['Booking.com'] || hotel.otaUrls?.Booking || '';
+        if (hasScrapeDo() && bookingUrl) {
+          const idn = await getBookingIdentity(bookingUrl);
+          if (idn?.scores && Object.keys(idn.scores).length) {
+            data = { overall: idn.rating || 0, scores: idn.scores, source: 'Booking.com' };
+          }
+        }
+      } catch (err) { console.warn('Category ratings (scrapedo) xato:', err.message); }
+    }
+
     if (!data?.scores || !Object.keys(data.scores).length) {
       if (cached) return fallback();
       return res.json({ configured: false, categories: [], reason: 'no_data' });
@@ -2059,6 +2074,24 @@ export async function getCompetitorDetail(req, res, next) {
     const ratingHistory = history
       .filter((h) => h.rating > 0)
       .map((h) => ({ date: h.date, rating: h.rating }));
+
+    // SCRAPE.DO enrich — raqibning reyting/sharh soni bo'sh bo'lsa va Booking
+    // URL'i saqlangan bo'lsa, sahifadan bir marta o'qib to'ldiramiz (1 kredit).
+    // Natija bazaga yoziladi — keyingi ochilishlarda qayta so'ralmaydi.
+    if ((!competitor.rating || !competitor.reviewCount)) {
+      try {
+        const { hasScrapeDo, getBookingIdentity } = await import('../services/scrapedo.service.js');
+        const bUrl = competitor.otaUrls?.get?.('Booking.com') || competitor.otaUrls?.['Booking.com'] || '';
+        if (hasScrapeDo() && bUrl) {
+          const idn = await getBookingIdentity(bUrl);
+          if (idn?.rating) {
+            competitor.rating = competitor.rating || idn.rating / 2; // Booking 10 → 5 shkala
+            competitor.reviewCount = competitor.reviewCount || idn.reviewCount || 0;
+            await competitor.save().catch(() => {});
+          }
+        }
+      } catch (err) { console.warn('Competitor enrich (scrapedo) xato:', err.message); }
+    }
 
     res.json({
       competitor: {

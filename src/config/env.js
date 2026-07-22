@@ -28,6 +28,9 @@ const schema = z.object({
   TRIP_RAPIDAPI_KEY: z.string().optional(),
   XOTELO_RAPIDAPI_KEY: z.string().optional(),
   HASDATA_API_KEY: z.string().optional(),
+  // Scrape.do — universal sahifa-tortish (Booking identity/kategoriya baholari
+  // fallback'i). Bepul 1000 kredit/oy. https://scrape.do
+  SCRAPEDO_API_KEY: z.string().optional(),
   // TripAdvisor rasmiy Content API — reyting, ranking, sharhlar (5 ta), rasmlar.
   // https://www.tripadvisor.com/developers — kalit IP whitelist talab qiladi.
   TRIPADVISOR_API_KEY: z.string().optional(),

@@ -37,8 +37,10 @@ export const PROVIDER_REGISTRY = {
   // ── Narx manbalari (OTA narxlari) ──────────────────────────────────────
   xotelo:  { website: 'https://xotelo.com',  monthlyLimit: null, free: true, category: 'prices',
              label: 'Xotelo (TripAdvisor)', note: 'Cheksiz bepul — 8+ OTA narxi, API kalit kerak emas', recommended: true },
+  scrapedo: { website: 'https://scrape.do', monthlyLimit: 1000, category: 'prices',
+              label: 'Scrape.do (Google Hotels)', note: 'Bepul: 1000 kredit/oy — 10 kredit/so\'rov. OTA narxlari (Booking/Agoda/Expedia...) + reyting. ASOSIY manba', recommended: true },
   serpapi: { website: 'https://serpapi.com', monthlyLimit: 100, category: 'prices',
-             label: 'SerpAPI', note: 'Bepul: 100 so\'rov/oy — google_hotels + sharhlar' },
+             label: 'SerpAPI', note: 'Bepul: 100 so\'rov/oy — Scrape.do fallback' },
   apify:   { website: 'https://apify.com',   monthlyLimit: null, category: 'prices',
              label: 'Apify', note: 'Bepul: $5 kredit/oy (~500-1000 scrape) — Booking/Expedia/Agoda' },
   hasdata: { website: 'https://hasdata.com', monthlyLimit: 1000, category: 'prices',

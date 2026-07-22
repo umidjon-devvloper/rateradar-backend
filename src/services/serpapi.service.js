@@ -55,7 +55,40 @@ function currencyForCountry(countryCode) {
   return SERPAPI_CURRENCIES.has(candidate) ? candidate : 'USD';
 }
 
-export async function getSerpApiHotelData({
+/**
+ * Hotel narx/kanal ma'lumoti — MANBA TARTIBI: Scrape.do (Google Hotels
+ * plugin) BIRINCHI, SerpAPI FALLBACK. Ikkalasi ham bir xil shakl qaytaradi.
+ *
+ * Istisno: saqlangan SerpAPI propertyToken bo'lsa, to'g'ridan-to'g'ri SerpAPI
+ * ishlatiladi (o'sha token faqat SerpAPI'da barqaror — tez yo'l).
+ *
+ * Chaqiruvchilar (8+ joy) o'zgarmaydi — funksiya nomi va shakli bir xil.
+ */
+export async function getSerpApiHotelData(opts) {
+  const { propertyToken: savedToken = '' } = opts || {};
+
+  // Saqlangan SerpAPI token — o'sha bilan SerpAPI'ga to'g'ridan-to'g'ri.
+  if (savedToken) return getSerpApiHotelDataRaw(opts);
+
+  // 1) Scrape.do Google Hotels (asosiy)
+  try {
+    const { hasScrapedoHotels, getScrapedoHotelData } = await import('./scrapedoHotels.service.js');
+    if (hasScrapedoHotels()) {
+      const sd = await getScrapedoHotelData(opts);
+      // Narx yoki OTA kanal kelgan bo'lsa — ishonchli natija.
+      if (sd && (sd.lowestPrice > 0 || sd.otaPrices?.length)) {
+        return sd;
+      }
+    }
+  } catch (err) {
+    console.warn('Scrape.do hotels (asosiy) xato, SerpAPI fallback:', err.message);
+  }
+
+  // 2) SerpAPI (fallback)
+  return getSerpApiHotelDataRaw(opts);
+}
+
+async function getSerpApiHotelDataRaw({
   name, city = '', countryCode = '', currency = '',
   // Saqlangan propertyToken — birinchi mos kelgan hotelni mahkamlaydi.
   // Keyingi yangilashlarda boshqa hotelga adashish bo'lmaydi.
