@@ -841,7 +841,10 @@ export async function refreshAllChannels(req, res, next) {
     // SerpAPI YO'Q bo'lsa ham to'xtamaymiz — to'g'ridan-to'g'ri fallback (HasData/
     // Apify) va oxir-oqibat Booking.com JONLI SKREYPER orqali narx olamiz.
     // Foydalanuvchi "Narxlarni yangilash" bossa, token bo'lmasa darrov skreyp.
-    const useSerp = hasSerpApi();
+    // MANBA: getSerpApiHotelData wrapper'i Scrape.do-first (SerpAPI fallback),
+    // shuning uchun ikkalasidan biri sozlangan bo'lsa ham "auto" yo'lini ochamiz.
+    const { hasScrapedoHotels } = await import('../services/scrapedoHotels.service.js');
+    const useSerp = hasSerpApi() || hasScrapedoHotels();
 
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });

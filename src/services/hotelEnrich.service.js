@@ -25,10 +25,11 @@ export async function enrichHotelData({ name, city = '', country = '', countryCo
     source: '',
   };
 
-  // 0. SerpAPI — asosiy manba (scraper/Apify'dan OLDIN so'raladi).
+  // 0. Auto (Scrape.do → SerpAPI) — asosiy manba (scraper/Apify'dan OLDIN).
   try {
     const { hasSerpApi, getSerpApiHotelData } = await import('./serpapi.service.js');
-    if (hasSerpApi()) {
+    const { hasScrapedoHotels } = await import('./scrapedoHotels.service.js');
+    if (hasScrapedoHotels() || hasSerpApi()) {
       const sd = await getSerpApiHotelData({ name, city, countryCode });
       if (sd) {
         if (sd.lowestPrice > 0) {

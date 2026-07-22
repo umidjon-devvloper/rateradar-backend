@@ -5,6 +5,10 @@ import PriceSnapshot from '../models/PriceSnapshot.js';
 import { searchNearby } from '../services/places.service.js';
 import { enrichHotelData } from '../services/hotelEnrich.service.js';
 import { getSerpApiReviewsForOta, getSerpApiHotelData, getSerpApiCategoryRatings, hasSerpApi } from '../services/serpapi.service.js';
+import { hasScrapedoHotels } from '../services/scrapedoHotels.service.js';
+// "Auto" narx yo'li — Scrape.do (asosiy) YOKI SerpAPI (fallback) sozlangan bo'lsa.
+// getSerpApiHotelData wrapper'i ikkalasini ham ichida boshqaradi.
+const hasAutoPrice = () => hasScrapedoHotels() || hasSerpApi();
 import {
   hasApify,
   getBookingPriceApify, getHotelsComPriceApify,
@@ -516,8 +520,8 @@ async function fetchOneCompetitorPrice(competitor, city, countryCode = '') {
     if (prices.length) return { best: Math.min(...prices), count: prices.length };
   }
 
-  // ── SerpAPI birinchi ────────────────────────────────────────────────
-  if (hasSerpApi()) {
+  // ── Auto (Scrape.do → SerpAPI) birinchi ─────────────────────────────
+  if (hasAutoPrice()) {
     const serpData = await getSerpApiHotelData({
       name: competitor.name, city, countryCode,
     }).catch(() => null);
@@ -647,7 +651,7 @@ export async function runInstantSnapshot(hotel) {
     //     kanali (Booking, Agoda, Expedia, …) keladi. Xotelo/skreyper faqat
     //     SerpAPI topmaganda ishlaydi.
     let ownChannels = [];
-    if (hasSerpApi()) {
+    if (hasAutoPrice()) {
       const serpData = await getSerpApiHotelData({
         name: hotel.name, city: hotel.city, countryCode: hotel.countryCode,
         propertyToken: hotel.serpPropertyToken || '',
@@ -851,8 +855,8 @@ export async function getMyCategoryRatings(req, res, next) {
 
     let data = null;
 
-    // 1) SerpAPI (kalit bo'lsa) — Google Hotels reviews_breakdown.
-    if (hasSerpApi()) {
+    // 1) Auto (Scrape.do → SerpAPI) — Google Hotels reviews_breakdown.
+    if (hasAutoPrice()) {
       try {
         const sr = await getSerpApiCategoryRatings({
           name: hotel.name,
@@ -1750,8 +1754,8 @@ export async function fetchCompetitorPrice(req, res, next) {
     let meta = { lowestPrice: 0 };
     let provider = 'serpapi';
 
-    // 1) SerpAPI (kalit bo'lsa) — bitta so'rovda barcha OTA.
-    if (hasSerpApi()) {
+    // 1) Auto (Scrape.do → SerpAPI) — bitta so'rovda barcha OTA.
+    if (hasAutoPrice()) {
       const data = await getSerpApiHotelData({
         name: competitor.name,
         city: myHotel.city,
