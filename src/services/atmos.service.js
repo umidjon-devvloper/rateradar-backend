@@ -253,9 +253,14 @@ export async function createInvoice({ amount, account, requestId, successUrl, it
   // Bu endpoint result o'rniga status.code "OK"/"0" qaytaradi.
   const code = data?.status?.code;
   if (code !== undefined && code !== 'OK' && String(code) !== '0') {
-    const e = new Error(`ATMOS invoice yaratilmadi: ${data?.status?.description || code}`);
+    // ATMOS'ning TO'LIQ javobini logga chiqaramiz — -999999 "System error"
+    // sababini (mahsulot yoqilmagan / success_url ro'yxatda yo'q) topish uchun.
+    console.error('[ATMOS invoice XATO] javob:', JSON.stringify(data));
+    console.error('[ATMOS invoice XATO] yuborilgan body:', JSON.stringify({ ...body, api_key: undefined }));
+    const desc = data?.status?.description || data?.status?.message || code;
+    const e = new Error(`ATMOS invoice yaratilmadi: ${desc}`);
     e.status = 400;
-    e.atmos = { code, raw: data };
+    e.atmos = { code, description: desc, raw: data };
     throw e;
   }
   return {
