@@ -1825,6 +1825,30 @@ export async function fetchCompetitorPrice(req, res, next) {
     });
     if (!competitor) return res.status(404).json({ error: 'Raqib topilmadi' });
 
+    // ── KUNLIK THROTTLE (token tejash) ──
+    // Bir raqib uchun kuniga bir marta real yangilash. Shu oralida qayta
+    // bosilsa — bazadagi narxni qaytaramiz, Scrape.do'ga so'rov KETMAYDI.
+    const THROTTLE_MS = 20 * 3600_000;
+    const force = req.query.force === 'true' || req.body?.force === true;
+    const lastF = competitor.lastPriceFetchedAt ? new Date(competitor.lastPriceFetchedAt).getTime() : 0;
+    if (!force && lastF && Date.now() - lastF < THROTTLE_MS) {
+      const lp = competitor.latestPrices instanceof Map
+        ? Object.fromEntries(competitor.latestPrices)
+        : (competitor.latestPrices || {});
+      const best = Object.values(lp).filter((v) => v > 0).sort((a, b) => a - b)[0] || 0;
+      return res.json({
+        _id: competitor._id,
+        throttled: true,
+        provider: 'cache',
+        googlePrice: best,
+        otaPrices: Object.entries(lp).filter(([, v]) => v > 0).map(([source, price]) => ({ source, price, currency: 'USD' })),
+        stars: competitor.stars,
+        rating: competitor.rating,
+        lastPriceFetchedAt: competitor.lastPriceFetchedAt,
+        message: 'Narx bugun allaqachon yangilangan.',
+      });
+    }
+
     let otaPrices = [];
     let meta = { lowestPrice: 0 };
     let provider = 'serpapi';

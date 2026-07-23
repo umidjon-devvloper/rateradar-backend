@@ -95,6 +95,76 @@ export function parseBookingHotelPage(html) {
 }
 
 /**
+ * Booking.com sahifasidagi tanlangan sharhlarni (featuredReviews) oladi.
+ * Sahifa HTML'ida GraphQL JSON ko'rinishida ~10 ta sharh bo'ladi:
+ *   { guestDetails:{username,countryCode}, reviewedDate, reviewScore,
+ *     textDetails:{title, positiveText, negativeText} }
+ * Apify/SerpAPI kalitisiz, 1 kredit. Sharh MATNI bilan (AI tahlil uchun).
+ *
+ * @returns {Promise<Array<{author, rating, text, date, source, externalId}>>}
+ */
+export async function getBookingReviews(bookingUrl) {
+  if (!bookingUrl || !/booking\.com/.test(bookingUrl)) return [];
+  const url = `${bookingUrl.split('?')[0]}?lang=en-us`;
+  let html;
+  try {
+    html = await fetchPage(url);
+  } catch (err) {
+    console.warn('Scrape.do getBookingReviews xato:', err.message);
+    return [];
+  }
+  if (!html) return [];
+
+  const out = [];
+  // featuredReviews massividagi har bir yozuvni ajratamiz.
+  const re = /"__typename":"PropertyFeaturedReview","reviewId":(\d+)[\s\S]{0,1400}?"textDetails":\{[^}]*\}/g;
+  let m;
+  const seen = new Set();
+  while ((m = re.exec(html)) !== null) {
+    const block = m[0];
+    const reviewId = m[1];
+    if (seen.has(reviewId)) continue;
+    seen.add(reviewId);
+
+    const g = (re2) => (block.match(re2) || [])[1] || '';
+    const author = g(/"username":"([^"]{1,60})"/) || 'Anonymous';
+    const country = g(/"countryCode":"([a-z]{2})"/);
+    const score10 = Number(g(/"reviewScore":(\d+(?:\.\d+)?)/)) || 0;
+    const dateUnix = Number(g(/"reviewedDate":(\d{9,13})/)) || 0;
+    const title = g(/"title":"((?:[^"\\]|\\.)*)"/);
+    const pos = g(/"positiveText":"((?:[^"\\]|\\.)*)"/);
+    const neg = g(/"negativeText":"((?:[^"\\]|\\.)*)"/);
+
+    // JSON escape'larni (\n) va HTML entity'larni (&#39; &amp;) ochamiz
+    const unesc = (s) => {
+      let t = s;
+      try { t = JSON.parse(`"${s}"`); } catch { /* xom qoldiramiz */ }
+      return t
+        .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+        .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCharCode(parseInt(n, 16)))
+        .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&nbsp;/g, ' ')
+        .trim();
+    };
+    const parts = [unesc(pos), unesc(neg)].filter(Boolean);
+    const text = parts.join(' — ').trim();
+    if (!text && !unesc(title)) continue;
+
+    out.push({
+      author: unesc(author),
+      country,
+      rating: score10 ? Math.round((score10 / 2) * 10) / 10 : 0, // 10 → 5 ball
+      title: unesc(title),
+      text: text || unesc(title),
+      date: dateUnix ? new Date(dateUnix * 1000) : null,
+      source: 'Booking.com',
+      externalId: `scrapedo:booking:${reviewId}`,
+    });
+  }
+  return out;
+}
+
+/**
  * Booking URL bo'yicha hotel identity (reyting + kategoriya baholari).
  * category-ratings fallback va raqib-enrich shu funksiyani ishlatadi.
  */

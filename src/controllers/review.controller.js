@@ -130,6 +130,41 @@ async function persistReviews(hotelId, items) {
   return { added, updated, skipped };
 }
 
+// Scrape.do Booking "featured" sharhlarini saqlaydi. Bular tanlangan (eng
+// foydali) sharhlar — ko'pincha 14 kundan eski, shuning uchun OYNA FILTRSIZ
+// saqlaymiz (AI tahlil va javob generatsiyasi uchun baribir qimmatli).
+// Reyting'dan sentiment chiqaramiz (Ijobiy/Salbiy filtr tablari uchun).
+async function persistScrapedoReviews(hotelId, items) {
+  let added = 0, updated = 0;
+  for (const r of items) {
+    if (!r.externalId || !r.text) continue;
+    try {
+      const exists = await Review.findOne({ ownerHotelId: hotelId, externalId: r.externalId });
+      if (exists) {
+        if ((!exists.text || !exists.text.trim()) && r.text) {
+          await Review.updateOne({ _id: exists._id }, { text: r.text });
+          updated += 1;
+        }
+        continue;
+      }
+      const sentiment = r.rating >= 4 ? 'positive' : r.rating > 0 && r.rating <= 2.5 ? 'negative' : 'neutral';
+      await Review.create({
+        targetType: 'own', targetId: hotelId, ownerHotelId: hotelId,
+        platform: r.source || 'Booking.com',
+        externalId: r.externalId,
+        author: r.author || 'Anonymous',
+        rating: r.rating || 0,
+        text: r.text,
+        publishedAt: r.date || null,
+        sentiment,
+        seenByUser: false,
+      });
+      added += 1;
+    } catch { continue; }
+  }
+  return { added, updated };
+}
+
 /**
  * Booking.com JONLI SKREYPER orqali sharhlarni olib, 14 kunlik oynaga
  * filtrlab bazaga saqlaydi. SerpAPI/Apify kalitlari yo'q bo'lsa ham ishlaydi.
@@ -439,10 +474,40 @@ export async function scrapeReviews(req, res, next) {
  */
 export async function scrapeApifyReviews(req, res, next) {
   try {
-    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY .env da sozlanmagan' });
-
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+
+    // ── SCRAPE.DO Booking sharhlari (asosiy, Apify'siz ham ishlaydi) ──
+    // Booking URL sozlangan bo'lsa, tanlangan sharhlarni 1 kreditga olamiz.
+    // Apify yiqilsa ham sharhlar keladi.
+    const wantBooking = !req.body?.source || ['all', 'booking'].includes(String(req.body.source).toLowerCase());
+    let scrapedoBooking = 0;
+    if (wantBooking) {
+      try {
+        const { hasScrapeDo, getBookingReviews } = await import('../services/scrapedo.service.js');
+        const bUrl = req.body?.bookingUrl || flatBookingUrl(hotel.otaUrls)
+          || (await findBookingUrl(hotel.name, hotel.city).catch(() => null));
+        if (hasScrapeDo() && bUrl) {
+          if (bUrl && !flatBookingUrl(hotel.otaUrls)) {
+            await Hotel.updateOne({ _id: hotel._id }, { $set: { otaUrls: { ...(hotel.otaUrls || {}), 'Booking.com': bUrl } } }).catch(() => {});
+          }
+          const revs = await getBookingReviews(bUrl);
+          const st = await persistScrapedoReviews(hotel._id, revs);
+          scrapedoBooking = st.added;
+        }
+      } catch (err) { console.warn('Scrape.do Booking sharh xato:', err.message); }
+    }
+
+    // Apify yo'q bo'lsa ham Scrape.do Booking'dan sharh kelgan bo'lishi mumkin.
+    if (!hasApify()) {
+      return res.json({
+        added: scrapedoBooking,
+        windowDays: REVIEW_WINDOW_DAYS,
+        source: 'scrapedo',
+        addedBySource: scrapedoBooking ? { 'Booking.com': scrapedoBooking } : {},
+        message: scrapedoBooking ? undefined : 'Booking sharhlari topilmadi (URL yo\'q yoki sahifada sharh yo\'q)',
+      });
+    }
 
     // reset=true bo'lsa — bu mehmonxonaning eski Apify sharhlarini o'chiramiz
     // (boshqa hotelning aralashib ketgan ma'lumotlarini tozalash uchun)
@@ -519,8 +584,11 @@ export async function scrapeApifyReviews(req, res, next) {
 
     // Har bir tanlangan manba uchun eski sharhlarni o'chiramiz (7 kunlik oynadan tashqari).
     // Bu apify scraper natijasi yo'q bo'lib qolsa ham eski yozuvlarni baribir tozalaydi.
+    // Scrape.do Booking sharhlari (featured, eski sanali) purge'ga tushib
+    // ketmasligi uchun — Scrape.do natija bergan bo'lsa Booking'ni tozalamaymiz.
+    const useApifyBooking = doBooking && scrapedoBooking === 0;
     const purgedBySource = {};
-    if (doBooking) purgedBySource['Booking.com'] = await purgeOldReviews(hotel._id, 'Booking.com');
+    if (useApifyBooking) purgedBySource['Booking.com'] = await purgeOldReviews(hotel._id, 'Booking.com');
     if (doAgoda)   purgedBySource.Agoda         = await purgeOldReviews(hotel._id, 'Agoda');
     if (doExpedia) purgedBySource.Expedia       = await purgeOldReviews(hotel._id, 'Expedia');
     if (doTrip)    purgedBySource['Trip.com']   = await purgeOldReviews(hotel._id, 'Trip.com');
@@ -529,7 +597,7 @@ export async function scrapeApifyReviews(req, res, next) {
     // Apify scraper'lar maxReviews=50 bilan eng yangilarini qaytaradi;
     // persistReviews ichida 7 kunlik oynadan tashqari yotganlari tashlanadi.
     const [bookingItems, agodaItems, expediaItems, tripItems, yandexItems] = await Promise.all([
-      (doBooking && bookingUrl) ? getBookingReviewsApify(bookingUrl, { maxReviews: 50 }).catch((e) => { console.warn(e.message); return []; }) : Promise.resolve([]),
+      (useApifyBooking && bookingUrl) ? getBookingReviewsApify(bookingUrl, { maxReviews: 50 }).catch((e) => { console.warn(e.message); return []; }) : Promise.resolve([]),
       (doAgoda && agodaUrl)     ? getAgodaReviewsApify(agodaUrl,   { maxReviews: 50 }).catch((e) => { console.warn(e.message); return []; }) : Promise.resolve([]),
       (doExpedia && expediaUrl) ? getExpediaReviewsApify(expediaUrl, { maxReviews: 50 }).catch((e) => { console.warn(e.message); return []; }) : Promise.resolve([]),
       (doTrip && tripUrl)       ? getTripReviewsApify(tripUrl,     { maxReviews: 50 }).catch((e) => { console.warn(e.message); return []; }) : Promise.resolve([]),
@@ -544,7 +612,7 @@ export async function scrapeApifyReviews(req, res, next) {
       persistReviews(hotel._id, yandexItems),
     ]);
 
-    const totalAdded = bookingStats.added + agodaStats.added + expediaStats.added + tripStats.added + yandexStats.added;
+    const totalAdded = scrapedoBooking + bookingStats.added + agodaStats.added + expediaStats.added + tripStats.added + yandexStats.added;
     const totalUpdated = bookingStats.updated + agodaStats.updated + expediaStats.updated + tripStats.updated + yandexStats.updated;
     const totalSkipped = bookingStats.skipped + agodaStats.skipped + expediaStats.skipped + tripStats.skipped + yandexStats.skipped;
     const totalFetched = bookingItems.length + agodaItems.length + expediaItems.length + tripItems.length + yandexItems.length;

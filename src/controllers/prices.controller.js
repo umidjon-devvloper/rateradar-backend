@@ -849,6 +849,29 @@ export async function refreshAllChannels(req, res, next) {
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
 
+    // ── KUNLIK THROTTLE (token tejash) ────────────────────────────────────
+    // Bir mehmonxona uchun kuniga BIR MARTA real yangilash (Scrape.do'ga so'rov).
+    // Shu oralida qayta bosilsa — bazadagi narxlarni qaytaramiz va "narx
+    // o'zgarmadi" deb bildiramiz (tokenga so'rov KETMAYDI). ?force=true — admin
+    // uchun majburiy yangilash (throttle'ni chetlab o'tadi).
+    const THROTTLE_MS = 20 * 3600_000; // 20 soat (kuniga ~1 marta)
+    const force = req.query.force === 'true' || req.body?.force === true;
+    const last = hotel.lastPriceRefreshedAt ? new Date(hotel.lastPriceRefreshedAt).getTime() : 0;
+    const throttled = !force && last && (Date.now() - last < THROTTLE_MS);
+
+    if (throttled) {
+      // Bazadan joriy narxlarni yig'ib qaytaramiz — yangi so'rovsiz.
+      const nextAt = new Date(last + THROTTLE_MS);
+      return res.json({
+        throttled: true,
+        lastRefreshedAt: hotel.lastPriceRefreshedAt,
+        nextRefreshAt: nextAt,
+        own: { channels: 0, ownPrice: hotel.currentPrice || 0 },
+        competitors: { total: 0, matched: 0 },
+        message: 'Narxlar bugun allaqachon yangilangan — hali o\'zgarmadi.',
+      });
+    }
+
     // Jonli progress — frontend animatsiyali panelda ko'rsatadi.
     const userId = req.user?._id;
     const emitProgress = (p) => { try { emitToUser(userId, 'price:progress', p); } catch { /* noop */ } };
