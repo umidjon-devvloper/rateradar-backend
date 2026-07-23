@@ -1070,16 +1070,60 @@ const APIFY_CHANNEL_SOURCES = {
   trip:    { fn: getTripComPriceApify, urlKey: 'Trip.com', urlArg: 'tripUrl', finder: findTripUrl, label: 'Trip.com' },
 };
 
+// Scrape.do Google Hotels'dan BITTA chaqiruvda BARCHA OTA narxlarini oladi
+// va so'ralgan kanalning narxini topadi. Bir chaqiruv = hamma kanal to'ladi.
+// @returns { channelPrice, allOta } yoki null
+async function scrapedoChannelPrices({ name, city, countryCode, wantLabel }) {
+  try {
+    const { hasScrapedoHotels, getScrapedoHotelData } = await import('../services/scrapedoHotels.service.js');
+    if (!hasScrapedoHotels()) return null;
+    const data = await getScrapedoHotelData({ name, city, countryCode, detail: true });
+    const otas = (data?.otaPrices || []).filter((o) => o.source && o.price > 0);
+    if (!otas.length) return null;
+    const want = String(wantLabel).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const hit = otas.find((o) => o.source.toLowerCase().replace(/[^a-z0-9]/g, '') === want);
+    return { channelPrice: hit?.price || 0, channelLink: hit?.link || null, allOta: otas };
+  } catch (err) {
+    console.warn('scrapedoChannelPrices xato:', err.message);
+    return null;
+  }
+}
+
 export async function fetchOtaChannel(req, res, next) {
   try {
-    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
-
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
 
     const source = String(req.body?.source || '').toLowerCase();
     const cfg = APIFY_CHANNEL_SOURCES[source];
     if (!cfg) return res.status(400).json({ error: `Noma'lum source: ${source}` });
+
+    // ── 1) SCRAPE.DO birinchi — bitta chaqiruvda barcha OTA narxi ──
+    const sdo = await scrapedoChannelPrices({
+      name: hotel.name, city: hotel.city, countryCode: hotel.countryCode,
+      wantLabel: cfg.label,
+    });
+    if (sdo?.allOta?.length) {
+      const checkInS = new Date(); checkInS.setDate(checkInS.getDate() + 7);
+      const checkOutS = new Date(checkInS); checkOutS.setDate(checkOutS.getDate() + 1);
+      // Barcha kanallarni snapshot'ga yozamiz (bonus — hammasi to'ladi)
+      for (const o of sdo.allOta) {
+        await PriceSnapshot.create({
+          targetType: 'own', targetId: hotel._id, ownerHotelId: hotel._id,
+          ota: o.source, price: o.price, currency: 'USD',
+          checkIn: checkInS, checkOut: checkOutS, source: 'serpapi',
+          raw: { link: o.link },
+        }).catch(() => {});
+      }
+      if (sdo.channelPrice > 0) {
+        return res.json({ source: cfg.label, price: sdo.channelPrice, via: 'scrapedo', link: sdo.channelLink });
+      }
+      // So'ralgan kanal yo'q, lekin boshqalar bor — Apify'ga o'tmaymiz, xabar beramiz
+      return res.json({ source: cfg.label, price: 0, message: `${cfg.label}'da narx yo'q (boshqa kanallar yangilandi)` });
+    }
+
+    // ── 2) APIFY fallback (Scrape.do topmasa) ──
+    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
 
     const hotelOtaUrls = normalizeOtaUrls(hotel.otaUrls);
     let url = hotelOtaUrls[cfg.urlKey] || null;
@@ -1669,7 +1713,6 @@ export async function updateCompetitorOtaUrls(req, res, next) {
  */
 export async function fetchCompetitorChannel(req, res, next) {
   try {
-    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
     const myHotel = req.hotel;
     if (!myHotel) return res.status(404).json({ error: 'Hotel topilmadi' });
     const competitor = await Competitor.findOne({
@@ -1680,6 +1723,38 @@ export async function fetchCompetitorChannel(req, res, next) {
     const source = String(req.body?.source || '').toLowerCase();
     const cfg = APIFY_CHANNEL_SOURCES[source];
     if (!cfg) return res.status(400).json({ error: `Noma'lum source: ${source}` });
+
+    // ── 1) SCRAPE.DO birinchi — bitta chaqiruvda raqibning BARCHA OTA narxi ──
+    const sdo = await scrapedoChannelPrices({
+      name: competitor.name, city: myHotel.city, countryCode: myHotel.countryCode,
+      wantLabel: cfg.label,
+    });
+    if (sdo?.allOta?.length) {
+      if (!(competitor.latestPrices instanceof Map)) {
+        competitor.latestPrices = new Map(Object.entries(competitor.latestPrices || {}));
+      }
+      const checkInS = new Date(); checkInS.setDate(checkInS.getDate() + 7);
+      const checkOutS = new Date(checkInS); checkOutS.setDate(checkOutS.getDate() + 1);
+      for (const o of sdo.allOta) {
+        const k = o.source.toLowerCase().replace(/[^a-z0-9]/g, '');
+        competitor.latestPrices.set(k, o.price);
+        await PriceSnapshot.create({
+          targetType: 'competitor', targetId: competitor._id, ownerHotelId: myHotel._id,
+          ota: o.source, price: o.price, currency: 'USD',
+          checkIn: checkInS, checkOut: checkOutS, source: 'serpapi',
+          raw: { link: o.link },
+        }).catch(() => {});
+      }
+      competitor.lastPriceFetchedAt = new Date();
+      await competitor.save().catch(() => {});
+      if (sdo.channelPrice > 0) {
+        return res.json({ source: cfg.label, price: sdo.channelPrice, via: 'scrapedo', link: sdo.channelLink });
+      }
+      return res.json({ source: cfg.label, price: 0, message: `${cfg.label}'da narx yo'q (boshqa kanallar yangilandi)` });
+    }
+
+    // ── 2) APIFY fallback ──
+    if (!hasApify()) return res.status(503).json({ error: 'APIFY_API_KEY sozlanmagan' });
 
     const urls = normalizeOtaUrls(competitor.otaUrls);
     let url = urls[cfg.urlKey]

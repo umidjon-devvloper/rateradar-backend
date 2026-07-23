@@ -143,10 +143,20 @@ export async function getScrapedoHotelData({ name, city = '', countryCode = '', 
 
   // Shahar listing (keshlangan — bir yangilashda barcha hotel bo'lishadi)
   const props = await getCityListing(city || name, countryCode, checkIn, checkOut, cur);
-  if (!props?.length) return null;
+  let match = null, score = -1;
+  if (props?.length) ({ best: match, score } = findBestMatch(name, props));
 
-  const { best: match, score } = findBestMatch(name, props);
-  // Nom umuman mos kelmasa (boshqa hotel) — ishonmaymiz.
+  // KICHIK HOTEL fallback: shahar top-20'sida yo'q bo'lsa (SULEYMAN kabi),
+  // nom bo'yicha aniq qidiruv qilamiz ("Suleyman Hotel Bukhara"). +10 kredit,
+  // lekin faqat topilmaganda va keshlanadi.
+  if ((!match || score < 30) && name) {
+    const nameProps = await getCityListing(
+      `${name} ${city}`.trim(), countryCode, checkIn, checkOut, cur);
+    if (nameProps?.length) {
+      const r = findBestMatch(name, nameProps);
+      if (r.best && r.score >= 30) { match = r.best; score = r.score; }
+    }
+  }
   if (!match || score < 30) return null;
 
   const result = {
