@@ -108,12 +108,12 @@ export async function createInvoice(req, res, next) {
       status: 'created',
     });
 
-    // To'lovdan keyin mijoz shu manzilga qaytadi — qaysi to'lov ekanini pay bilan
-    // bildiramiz. Agar successUrl'da allaqachon ?query bo'lsa & bilan qo'shamiz
-    // (ikkita ? buzuq URL beradi va ATMOS uni -999999 bilan rad etadi).
-    const base = (successUrl || `${env.CLIENT_URL}/billing`).replace(/\/$/, '');
-    const sep = base.includes('?') ? '&' : '?';
-    const returnUrl = `${base}${sep}pay=${payment._id}`;
+    // To'lovdan keyin mijoz shu manzilga qaytadi. Kelgan successUrl'dagi HAR
+    // QANDAY query'ni tashlaymiz va faqat bitta ?pay=<id> qo'yamiz — toza,
+    // yagona-query URL (ATMOS query'li/buzuq manzilni -999999 bilan rad etadi).
+    let base = successUrl || `${env.CLIENT_URL}/billing`;
+    base = base.split('?')[0].split('#')[0].replace(/\/$/, '');
+    const returnUrl = `${base}?pay=${payment._id}`;
 
     const { url, payment_id, token, raw } = await atmos.createInvoice({
       amount,
