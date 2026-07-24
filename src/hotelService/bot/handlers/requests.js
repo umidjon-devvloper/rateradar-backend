@@ -167,6 +167,70 @@ const setupRequestHandlers = (bot) => {
       await ctx.answerCbQuery("Xatolik yuz berdi");
     }
   });
+
+  // ── ADMIN "HAL QILDIM (o'zim)" ────────────────────────────────────────
+  // Nazorat eslatmasi tagidagi tugma. Admin tashqarida (qo'ng'iroq q.k.) hal
+  // qilganini bildiradi: takror eslatmalar to'xtaydi, sayt "Admin hal qildi"
+  // deb belgilaydi, barcha chatlardagi ochiq buyurtma xabarlari yopiladi.
+  bot.action(/^resolve_(.+)$/, async (ctx) => {
+    const requestId = ctx.match[1];
+    const telegramId = ctx.from.id;
+    try {
+      const reqDoc = await Request.findById(requestId);
+      if (!reqDoc) { await ctx.answerCbQuery("❌ Topilmadi"); return; }
+
+      // Faqat shu mehmonxona admini hal qila oladi.
+      const hotel = await Hotel.findOne({ hotel_id: reqDoc.hotel_id });
+      if (!hotel || hotel.admin_telegram_id !== telegramId) {
+        await ctx.answerCbQuery("⛔ Faqat admin", { show_alert: true });
+        return;
+      }
+
+      if (reqDoc.admin_resolved || reqDoc.status === "completed") {
+        try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch (_) {}
+        await ctx.answerCbQuery("Allaqachon yopilgan");
+        return;
+      }
+
+      reqDoc.admin_resolved = true;
+      reqDoc.admin_resolved_at = new Date();
+      reqDoc.admin_resolved_by = telegramId;
+      reqDoc.status = "completed";
+      reqDoc.completed_at = new Date();
+      await reqDoc.save();
+
+      // Eslatma xabarini yangilaymiz — tugma o'chadi.
+      try {
+        await ctx.editMessageText(
+          (ctx.callbackQuery?.message?.text || "") + "\n\n✅ <b>Admin hal qildi</b>",
+          { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } },
+        );
+      } catch (_) {
+        try { await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); } catch (_) {}
+      }
+
+      // Barcha chatlardagi (guruh + xodimlar) ochiq buyurtma xabarlarini yopamiz.
+      const closedText = `✅ Admin hal qildi\n🏠 ${reqDoc.room_number}`;
+      for (const [idStr, msgId] of reqDoc.msg_ids.entries()) {
+        const chatId = parseInt(idStr);
+        try {
+          await bot.telegram.editMessageText(
+            chatId, msgId, null, closedText,
+            { parse_mode: "HTML", reply_markup: { inline_keyboard: [] } },
+          );
+        } catch (_) {}
+      }
+
+      emit.requestCompleted(reqDoc.hotel_id, {
+        request: reqDoc.toObject(),
+        adminResolved: true,
+      });
+      await ctx.answerCbQuery("✅ Hal qilindi deb belgilandi");
+    } catch (err) {
+      console.error("Resolve error:", err.message);
+      await ctx.answerCbQuery("Xatolik yuz berdi");
+    }
+  });
 };
 
 module.exports = { setupRequestHandlers };

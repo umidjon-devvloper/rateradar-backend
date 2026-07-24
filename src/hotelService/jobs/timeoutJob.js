@@ -20,13 +20,23 @@ async function getHotelCached(cache, hotelId) {
   return cache.get(hotelId);
 }
 
-// Adminga xabar — bot yo'q/bloklangan bo'lsa jim o'tadi
-async function notifyAdmin(hotel, text) {
+// Adminga xabar — bot yo'q/bloklangan bo'lsa jim o'tadi.
+// requestId berilsa xabar tagida "✅ Hal qildim (o'zim)" tugmasi chiqadi —
+// admin bossa takror eslatmalar to'xtaydi va saytda "Admin hal qildi" bo'ladi.
+async function notifyAdmin(hotel, text, requestId) {
   if (!hotel?.admin_telegram_id) return;
   try {
     const bot = getBot();
     if (!bot) return;
-    await bot.telegram.sendMessage(hotel.admin_telegram_id, text, { parse_mode: "HTML" });
+    const extra = { parse_mode: "HTML" };
+    if (requestId) {
+      extra.reply_markup = {
+        inline_keyboard: [[
+          { text: "✅ Hal qildim (o'zim)", callback_data: `resolve_${requestId}` },
+        ]],
+      };
+    }
+    await bot.telegram.sendMessage(hotel.admin_telegram_id, text, extra);
   } catch (err) {
     console.error(`Admin ogohlantirish yuborilmadi (${hotel.admin_telegram_id}):`, err.message);
   }
@@ -46,6 +56,7 @@ const startTimeoutJob = () => {
       // (hali ogohlantirilmagan YOKI oxirgi eslatmadan beri interval o'tgan)
       const overdue = await Request.find({
         status: "pending",
+        admin_resolved: { $ne: true }, // admin "hal qildim" bosgan bo'lsa eslatma yo'q
         created_at: { $lt: overdueBefore },
         $or: [
           { is_timeout_notified: false },
@@ -67,7 +78,8 @@ const startTimeoutJob = () => {
           `🏠 Xona: ${req.room_number}\n` +
           `🛎 Xizmat: ${req.service_id?.name || ""}` +
           (req.sub_option_translated || req.sub_option
-            ? `\n📋 Tur: ${req.sub_option_translated || req.sub_option}` : "")
+            ? `\n📋 Tur: ${req.sub_option_translated || req.sub_option}` : ""),
+          req._id,
         );
 
         await Request.findByIdAndUpdate(req._id, {
@@ -83,6 +95,7 @@ const startTimeoutJob = () => {
       const acceptOverdueBefore = new Date(now - ACCEPT_OVERDUE_MS);
       const notDone = await Request.find({
         status: "accepted",
+        admin_resolved: { $ne: true }, // admin "hal qildim" bosgan bo'lsa eslatma yo'q
         accepted_at: { $lt: acceptOverdueBefore },
         $or: [
           { accepted_overdue_notified_at: null },
@@ -111,7 +124,8 @@ const startTimeoutJob = () => {
           `👤 Qabul qilgan: <b>${who}</b>\n` +
           `🏠 Xona: ${req.room_number}\n` +
           `🛎 Xizmat: ${req.service_id?.name || ""}\n` +
-          `⏳ Qabul qilinganiga: ${h ? `${h} soat ` : ""}${min} daqiqa bo'ldi`
+          `⏳ Qabul qilinganiga: ${h ? `${h} soat ` : ""}${min} daqiqa bo'ldi`,
+          req._id,
         );
 
         await Request.findByIdAndUpdate(req._id, {

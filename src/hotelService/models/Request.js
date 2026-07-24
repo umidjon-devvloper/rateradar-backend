@@ -34,6 +34,12 @@ const requestSchema = new mongoose.Schema({
   // "Qabul qilindi lekin bajarilmadi" ogohlantirishi yuborilgan vaqt (admin)
   accepted_overdue_notified_at: { type: Date, default: null },
 
+  // Admin eslatmaga "Hal qildim (o'zim)" bosgan — tashqarida hal qilingan.
+  // Bu true bo'lsa takror eslatmalar TO'XTAYDI va saytda "Admin hal qildi" belgisi chiqadi.
+  admin_resolved:     { type: Boolean, default: false },
+  admin_resolved_at:  { type: Date, default: null },
+  admin_resolved_by:  { type: Number, default: null },
+
   created_at:   { type: Date, default: Date.now },
   accepted_at:  { type: Date, default: null },
   completed_at: { type: Date, default: null },

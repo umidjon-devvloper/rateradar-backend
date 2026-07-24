@@ -12,6 +12,17 @@ const Hotel = require("../../models/Hotel");
 const isGroup = (ctx) =>
   ctx.chat?.type === "group" || ctx.chat?.type === "supergroup";
 
+// Guruhda buyruq yuborgan odam GURUH ADMINI (creator/administrator) mi?
+// Telegram'dan real vaqtda so'raymiz — faqat admin ulash/uzish qila oladi.
+const isChatAdmin = async (ctx) => {
+  try {
+    const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
+    return member?.status === "creator" || member?.status === "administrator";
+  } catch (_) {
+    return false;
+  }
+};
+
 const setupGroupHandlers = (bot) => {
   // GURUHDA: guruhni mehmonxonaga ulaydi (buyurtmalar guruhga tushadi).
   // SHAXSIY chatda: yuborgan odamni ADMIN sifatida ulaydi — unga barcha
@@ -30,13 +41,17 @@ const setupGroupHandlers = (bot) => {
     }
 
     if (isGroup(ctx)) {
+      // FAQAT GURUH ADMINI ulashi mumkin.
+      if (!(await isChatAdmin(ctx))) {
+        return ctx.reply("⛔ Faqat guruh administratori mehmonxonani ulashi mumkin.");
+      }
       hotel.group_chat_id = ctx.chat.id;
       hotel.group_title = ctx.chat.title || "";
       await hotel.save();
       return ctx.reply(
         `✅ "${hotel.hotel_name}" shu guruhga ulandi!\n\n` +
         `Endi mehmonlarning barcha buyurtmalari shu guruhga tushadi. ` +
-        `Uzish uchun: /uzish`
+        `Uzish uchun: faqat admin /uzish yozadi.`
       );
     }
 
@@ -61,6 +76,14 @@ const setupGroupHandlers = (bot) => {
     if (isGroup(ctx)) {
       const hotel = await Hotel.findOne({ group_chat_id: ctx.chat.id });
       if (!hotel) return ctx.reply("ℹ️ Bu guruhga hech qanday mehmonxona ulanmagan.");
+      // FAQAT admin uzishi mumkin — oddiy a'zo /uzish yozsa uzilMAYDI.
+      // Admin = Telegram guruh admini YOKI shu mehmonxonaning ulangan admini.
+      const allowed =
+        (await isChatAdmin(ctx)) ||
+        (hotel.admin_telegram_id && ctx.from.id === hotel.admin_telegram_id);
+      if (!allowed) {
+        return ctx.reply("⛔ Faqat guruh administratori guruhni uzishi mumkin.");
+      }
       hotel.group_chat_id = null;
       hotel.group_title = "";
       await hotel.save();
