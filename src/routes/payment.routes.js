@@ -13,6 +13,7 @@ import {
   getSavedCard,
   removeSavedCard,
   setAutoRenew,
+  createMpsPayment,
 } from '../controllers/payment.controller.js';
 
 const router = Router();
@@ -97,6 +98,17 @@ router.post('/create', createPayment);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/invoice', createInvoice);
+
+/**
+ * @openapi
+ * /payments/mps:
+ *   post:
+ *     tags: [Payments]
+ *     summary: Visa/MC — o'z formamiz orqali (/mps/pay, 3DS). redirectUri qaytadi.
+ *     responses:
+ *       201: { description: "{ paymentId, redirectUri } — 3DS sahifasiga yo'naltiriladi" }
+ */
+router.post('/mps', createMpsPayment);
 
 /**
  * @openapi

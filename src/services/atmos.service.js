@@ -313,6 +313,140 @@ export async function chargeWithSavedCard({ cardToken, amount, account, lang = '
   };
 }
 
+// ─── Visa / Mastercard — /mps/pay oqimi (3DS + karta bog'lash) ──────────
+/**
+ * /mps endpointlari `apikey` header ham talab qiladi (ATMOS_API_KEY).
+ * Javob shakli: { payload: {...}, status: { code: 0, message } } — merchant/pay'dan farq.
+ */
+async function mpsPost(path, body, { method = 'post' } = {}) {
+  const token = await getToken();
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    'Content-Type': 'application/json',
+  };
+  if (env.ATMOS_API_KEY) headers.apikey = env.ATMOS_API_KEY;
+  try {
+    const { data } = await axios({ method, url: `${BASE}${path}`, data: body, headers, timeout: 60_000 });
+    return data;
+  } catch (err) {
+    if (err.response?.status === 401) {
+      _token = null;
+      const t2 = await getToken();
+      headers.Authorization = `Bearer ${t2}`;
+      const { data } = await axios({ method, url: `${BASE}${path}`, data: body, headers, timeout: 60_000 });
+      return data;
+    }
+    throw normalizeError(err);
+  }
+}
+
+// /mps javobida status.code 0 (yoki "0"/"OK") = muvaffaqiyat.
+function ensureMpsOk(data, ctx) {
+  const code = data?.status?.code;
+  const ok = code === 0 || code === '0' || code === 'OK';
+  if (!ok) {
+    const desc = data?.status?.message || data?.status?.description || code;
+    const e = new Error(`ATMOS mps ${ctx} xato: ${desc}`);
+    e.status = 400;
+    e.atmos = { code, description: desc, raw: data };
+    throw e;
+  }
+  return data;
+}
+
+/** 1) Chernovik mps tranzaksiya. @returns transactionId (payload.id). */
+export async function mpsPreCreate({ amount, account, extId, invoiceId }) {
+  const body = {
+    amount, // tiyinda
+    ext_id: String(extId),
+    store_id: Number(env.ATMOS_STORE_ID),
+    account: String(account),
+    ofd_items: [],
+    ...(invoiceId ? { invoice_id: String(invoiceId) } : {}),
+  };
+  const data = await mpsPost('/mps/pay/transaction/pre-create', body);
+  ensureMpsOk(data, 'pre-create');
+  return { transactionId: data.payload?.id, payload: data.payload, raw: data };
+}
+
+/**
+ * 2) Karta ma'lumoti bilan to'lov yaratish — kartani bog'laydi (card_id) va
+ *    3DS uchun redirect_uri qaytaradi.
+ * @returns {cardId, redirectUri, maskedPan, cardType, status, raw}
+ */
+export async function mpsCreate({ pan, expiry, amount, transactionId, cardName, cvc2, clientIp, extId }) {
+  const body = {
+    pan: String(pan).replace(/\s+/g, ''),
+    expiry: String(expiry), // YYMM
+    amount,
+    transaction_id: Number(transactionId),
+    card_name: cardName || '',
+    cvc2: String(cvc2),
+    client_ip_addr: clientIp || '0.0.0.0',
+    ext_id: String(extId),
+  };
+  const data = await mpsPost('/mps/pay/transaction/create', body);
+  ensureMpsOk(data, 'create');
+  const p = data.payload || {};
+  return {
+    cardId: p.card_id ?? p.card?.id ?? null,
+    redirectUri: p.redirect_uri ?? null,
+    maskedPan: p.masked_pan ?? p.card?.masked_pan ?? null,
+    cardType: p.card?.card_type ?? null,
+    status: p.status ?? null,
+    resultCode: p.result_code ?? null,
+    payload: p,
+    raw: data,
+  };
+}
+
+/** 3) 3DS'dan keyin yakunlash. @returns payload {status, status_3ds, result_code}. */
+export async function mpsApply({ transactionId }) {
+  const data = await mpsPost('/mps/pay/transaction/apply', { transaction_id: Number(transactionId) });
+  const p = data.payload || {};
+  return {
+    status: p.status ?? null,
+    status3ds: p.status_3ds ?? null,
+    resultCode: p.result_code ?? null,
+    cardId: p.card_id ?? null,
+    maskedPan: p.masked_pan ?? null,
+    ok: (data?.status?.code === 0 || data?.status?.code === '0') && /approv|success/i.test(String(p.result_code || '')),
+    payload: p,
+    raw: data,
+  };
+}
+
+/** Tranzaksiya holatini so'rash. */
+export async function mpsGet(transactionId) {
+  const data = await mpsPost(`/mps/pay/transaction/get/${Number(transactionId)}`, undefined, { method: 'get' });
+  return { payload: data.payload || null, raw: data };
+}
+
+/**
+ * SAQLANGAN Visa/MC kartadan avtomatik yechish (3DS'siz) — recurring.
+ * card_id bog'langan (verified) bo'lishi kerak.
+ * @returns {ok, resultCode, payload, raw}
+ */
+export async function mpsChargeTemplate({ cardId, amount, clientIp, extId }) {
+  const body = {
+    card_id: Number(cardId),
+    amount,
+    client_ip_addr: clientIp || '0.0.0.0',
+    ext_id: String(extId),
+  };
+  const data = await mpsPost('/mps/pay/transaction/create/template', body);
+  ensureMpsOk(data, 'create/template');
+  const p = data.payload || {};
+  return {
+    transactionId: p.id ?? null,
+    resultCode: p.result_code ?? null,
+    ok: /approv|success/i.test(String(p.result_code || '')),
+    redirectUri: p.redirect_uri ?? null,
+    payload: p,
+    raw: data,
+  };
+}
+
 // Toshkent vaqti (UTC+5, DST yo'q) bo'yicha "yyyy-MM-ddTHH:mm:ss" sana.
 // minFromNow — necha daqiqa keyin (invoys muddati).
 function atmosLocalDate(minFromNow = 0) {

@@ -28,7 +28,12 @@ const paymentSchema = new mongoose.Schema(
     // To'lov kanali:
     //   card    — saytda karta + SMS-OTP (UzCard/Humo)
     //   invoice — ATMOS to'lov sahifasi (UzCard/Humo/Visa/Mastercard, 3DS)
-    channel: { type: String, enum: ['card', 'invoice'], default: 'card' },
+    //   mps     — o'z formamiz Visa/MC + 3DS (/mps/pay) — karta bog'lanadi (card_id)
+    channel: { type: String, enum: ['card', 'invoice', 'mps'], default: 'card' },
+
+    // ATMOS tomoni (mps kanali — Visa/MC)
+    mpsTransactionId: { type: Number, default: null, index: true },
+    mpsCardId: { type: Number, default: null }, // bog'langan karta (recurring uchun)
 
     // ATMOS tomoni (card kanali)
     account: { type: String, required: true, unique: true, index: true },

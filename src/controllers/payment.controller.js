@@ -159,6 +159,102 @@ const cardSchema = z.object({
   saveCard: z.boolean().optional(), // kartani eslab qolish (avto-to'lov)
 });
 
+const mpsSchema = z.object({
+  plan: purchasablePlan,
+  cardNumber: z.string().min(12),
+  expiry: z.string().min(4),
+  cvc: z.string().min(3).max(4),
+  cardName: z.string().optional(),
+  saveCard: z.boolean().optional(),
+});
+
+/**
+ * POST /api/payments/mps   { plan, cardNumber, expiry, cvc, cardName, saveCard? }
+ * Visa/Mastercard — o'z formamiz orqali (/mps/pay). Karta bog'lanadi (card_id)
+ * va 3DS uchun redirectUri qaytadi. saveCard=true bo'lsa 3DS'dan keyin card_id
+ * saqlanadi (avto-to'lov). Mijoz redirectUri'ga yo'naltiriladi.
+ */
+export async function createMpsPayment(req, res, next) {
+  try {
+    const { plan, cardNumber, expiry, cvc, cardName, saveCard } = mpsSchema.parse(req.body);
+    const amount = planAmountTiyin(plan);
+    const account = genAccount();
+    const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || '0.0.0.0';
+
+    const payment = await Payment.create({
+      user: req.user._id, plan, amount, account,
+      channel: 'mps', status: 'created', saveCard: Boolean(saveCard),
+    });
+
+    const pre = await atmos.mpsPreCreate({ amount, account, extId: account });
+    const created = await atmos.mpsCreate({
+      pan: cardNumber,
+      expiry: atmos.normalizeExpiry(expiry),
+      amount,
+      transactionId: pre.transactionId,
+      cardName: cardName || req.user.name || 'CARD HOLDER',
+      cvc2: cvc,
+      clientIp,
+      extId: account,
+    });
+
+    payment.mpsTransactionId = pre.transactionId;
+    payment.mpsCardId = created.cardId || null;
+    payment.cardPan = created.maskedPan || null;
+    payment.status = 'otp_sent'; // 3DS kutilmoqda
+    payment.raw = { mpsPreCreate: pre.raw, mpsCreate: created.raw };
+    await payment.save();
+
+    res.status(201).json({
+      paymentId: payment._id,
+      redirectUri: created.redirectUri, // 3DS sahifasi — mijoz shu yerga o'tadi
+      cardId: created.cardId,
+      status: created.status,
+    });
+  } catch (err) {
+    handleErr(err, next);
+  }
+}
+
+// 3DS'dan qaytgach mps to'lovni yakunlaydi: apply + holat. paid bo'lsa obuna
+// yoqiladi va saveCard bo'lsa karta (card_id) saqlanadi. getPayment ichidan chaqiriladi.
+async function finalizeMpsPayment(payment, user) {
+  if (payment.status === 'paid' || !payment.mpsTransactionId) return payment;
+  let applied;
+  try {
+    applied = await atmos.mpsApply({ transactionId: payment.mpsTransactionId });
+  } catch {
+    // apply erta chaqirilgan bo'lishi mumkin — holatни get bilan tekshiramiz
+    try {
+      const g = await atmos.mpsGet(payment.mpsTransactionId);
+      applied = { ok: /approv|success/i.test(String(g.payload?.result_code || '')), payload: g.payload };
+    } catch { return payment; }
+  }
+  if (applied?.ok) {
+    payment.status = 'paid';
+    payment.paidAt = new Date();
+    await payment.save();
+    await activateSubscription(payment.user, payment.plan);
+
+    if (payment.saveCard && payment.mpsCardId) {
+      await User.findByIdAndUpdate(payment.user, {
+        autoRenew: true,
+        renewFailCount: 0,
+        savedCard: {
+          provider: detectCardProvider(payment.cardPan),
+          token: null,
+          cardId: payment.mpsCardId,
+          pan: payment.cardPan || null,
+          expiry: null,
+          holder: null,
+          boundAt: new Date(),
+        },
+      });
+    }
+  }
+  return payment;
+}
+
 /**
  * POST /api/payments/card   { paymentId, cardNumber, expiry, saveCard? }
  * 2-qadam: karta ma'lumotini yuboradi → kartaga SMS-OTP keladi.
@@ -354,6 +450,11 @@ export async function listMyPayments(req, res, next) {
 export async function getPayment(req, res, next) {
   try {
     const payment = await findOwnPayment(req.params.id, req.user._id);
+
+    // MPS kanali (Visa/MC) — 3DS'dan qaytgach yakunlaymiz.
+    if (payment.channel === 'mps' && payment.status !== 'paid') {
+      await finalizeMpsPayment(payment, req.user);
+    }
 
     // Invoice kanali — ATMOS to'lov sahifasidan qaytgach holatni so'raymiz.
     if (payment.channel === 'invoice' && payment.status !== 'paid' && payment.invoicePaymentId) {

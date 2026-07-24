@@ -45,12 +45,27 @@ async function renewOne(user) {
   user.lastRenewAttemptAt = new Date();
 
   try {
-    const result = await atmos.chargeWithSavedCard({
-      cardToken: user.savedCard.token,
-      amount,
-      account,
-      lang: user.lang || 'uz',
-    });
+    const provider = user.savedCard.provider;
+    const isMps = provider === 'visa' || provider === 'mastercard';
+    let result;
+
+    if (isMps) {
+      // Visa/MC — bog'langan card_id bilan 3DS'siz yechish (/mps template).
+      if (!user.savedCard.cardId) throw new Error('card_id yo\'q (Visa recurring)');
+      payment.channel = 'mps';
+      const r = await atmos.mpsChargeTemplate({
+        cardId: user.savedCard.cardId, amount, extId: account, clientIp: '0.0.0.0',
+      });
+      if (!r.ok) { const e = new Error(`mps template rad: ${r.resultCode}`); e.atmos = { code: r.resultCode }; throw e; }
+      result = { success_trans_id: r.transactionId, ofd_url: null };
+      payment.mpsCardId = user.savedCard.cardId;
+      payment.mpsTransactionId = r.transactionId || null;
+    } else {
+      // Humo/UzCard — card_token bilan (OTP'siz).
+      result = await atmos.chargeWithSavedCard({
+        cardToken: user.savedCard.token, amount, account, lang: user.lang || 'uz',
+      });
+    }
 
     payment.status = 'paid';
     payment.paidAt = new Date();
@@ -94,7 +109,8 @@ export async function runRenewals() {
   // token select:false — shuning uchun aniq so'raymiz.
   const users = await User.find({
     autoRenew: true,
-    'savedCard.token': { $ne: null },
+    // Humo/UzCard → token; Visa/MC → cardId. Ikkalasidan biri bo'lsa yetadi.
+    $or: [{ 'savedCard.token': { $ne: null } }, { 'savedCard.cardId': { $ne: null } }],
     planExpiresAt: { $gte: windowStart, $lte: windowEnd },
   }).select('+savedCard.token email lang savedCard autoRenew planExpiresAt renewFailCount lastRenewAttemptAt');
 
