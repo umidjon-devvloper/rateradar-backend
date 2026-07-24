@@ -1,12 +1,7 @@
 /**
- * ATMOS Invoice — DETAILS bilan item-format aniqlash (2-bosqich).
- *
- * ISHLATISH (production serverda, backend papkadan):
+ * ATMOS Invoice — details format diagnostikasi (3-bosqich).
+ * Har variant uchun ATMOS'ning TO'LIQ xom javobini chiqaradi.
  *   node scripts/atmos-invoice-test.mjs
- *
- * 1-bosqichda aniqlandi: item monetar maydoni = `amount`, va `details`
- * massivi MAJBURIY (yo'q bo'lsa -999999). Bu bosqich `details`'ning
- * qaysi minimal ko'rinishi ishlashini topadi.
  */
 import 'dotenv/config';
 import { env } from '../src/config/env.js';
@@ -14,7 +9,7 @@ import axios from 'axios';
 
 const BASE = env.ATMOS_BASE_URL || 'https://apigw.atmos.uz';
 const STORE = Number(env.ATMOS_STORE_ID);
-const AMOUNT = 100000; // 1 000 so'm tiyinda
+const AMOUNT = 100000;
 
 console.log('STORE_ID :', STORE, ' BASE:', BASE, '\n');
 
@@ -31,22 +26,18 @@ function localDate(min = 60) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
-// Hammasida amount summasi = invoice AMOUNT. Faqat `details` ko'rinishi farq qiladi.
 const base = { items_id: '1', name: 'RateRadar Pro', amount: AMOUNT, quantity: 1 };
 const variants = {
-  'F: details=[] (bo\'sh massiv)': [{ ...base, details: [] }],
-  'G: details=[{name:package_code}]': [{ ...base, details: [{ name: 'package_code', values: '10305001001000000' }] }],
-  'H: to\'liq details (hujjat misoli)': [{
-    ...base, code: 'RRPRO',
-    details: [
-      { name: 'package_code', values: '10305001001000000' },
-      { name: 'mark_code', values: '' },
-      { name: 'tin', values: '' },
-      { name: 'discount', values: '0' },
-      { name: 'quantity', values: '1' },
-    ],
-  }],
-  'I: details=[{name:quantity,values:1}]': [{ ...base, details: [{ name: 'quantity', values: '1' }] }],
+  // details ichida `value` (birlik)
+  'J: details value (birlik)': [{ ...base, details: [{ name: 'package_code', value: '10305001001000000' }] }],
+  // details ichida `values` massiv sifatida
+  'K: values massiv': [{ ...base, details: [{ name: 'package_code', values: ['10305001001000000'] }] }],
+  // details — obyekt (massiv emas)
+  'L: details obyekt': [{ ...base, details: { package_code: '10305001001000000' } }],
+  // details YO'Q, lekin expiration_time qo'shilgan (hujjat misolida bor)
+  'M: details yo\'q + expiration_time': [{ ...base }],
+  // faqat majburiy minimal: items_id + name + amount (quantity/details yo'q)
+  'N: minimal items_id+name+amount': [{ items_id: '1', name: 'RateRadar Pro', amount: AMOUNT }],
 };
 
 let winner = null;
@@ -54,6 +45,7 @@ for (const [label, items] of Object.entries(variants)) {
   const rid = 'test' + String(process.hrtime.bigint()).slice(-9);
   const body = {
     request_id: rid, store_id: STORE, account: rid, amount: AMOUNT,
+    expiration_time: 60,
     success_url: 'https://thehotelsaas.com/billing',
     expiration_date: localDate(60), items,
   };
@@ -62,13 +54,10 @@ for (const [label, items] of Object.entries(variants)) {
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 60000,
     });
     const code = data?.status?.code;
-    if (code === undefined || code === 'OK' || String(code) === '0') {
-      console.log(`✅ ${label}\n   url: ${data.url}\n   payment_id: ${data.payment_id}`);
-      if (!winner) winner = { label, items };
-    } else {
-      const desc = data?.status?.locale?.uz || data?.status?.description || '';
-      console.log(`❌ ${label} → code ${code} ${desc}`);
-    }
+    const ok = code === undefined || code === 'OK' || String(code) === '0';
+    console.log(`${ok ? '✅' : '❌'} ${label}`);
+    console.log('   RAW:', JSON.stringify(data));
+    if (ok && !winner) winner = { label, items };
   } catch (e) {
     console.log(`⚠️  ${label} → ${e.response ? JSON.stringify(e.response.data) : e.message}`);
   }
@@ -77,7 +66,7 @@ for (const [label, items] of Object.entries(variants)) {
 console.log('\n──────────────');
 if (winner) {
   console.log('ISHLAYDIGAN FORMAT:', winner.label);
-  console.log('items namunasi:', JSON.stringify(winner.items, null, 2));
+  console.log('items:', JSON.stringify(winner.items, null, 2));
 } else {
-  console.log('Hech biri ishlamadi — natijani menga yuboring.');
+  console.log('Hech biri ishlamadi — yuqoridagi RAW javoblarni menga yuboring.');
 }
