@@ -90,7 +90,7 @@ export async function sendCompetitorPriceAlert({ userEmail, hotelName, yourPrice
 
 // Landing formasidan kelgan lead (bog'lanish so'rovi) — mehmonxona egasiga.
 // Yillik reja uchun "Biz bilan bog'laning" formasi shu funksiyani ishlatadi.
-export async function sendLeadEmail({ name, hotel, phone, email, city, plan, message }) {
+export async function sendLeadEmail({ name, hotel, phone, country, email, city, plan, message }) {
   const to = env.LEADS_EMAIL || 'info@thehotelsaas.com';
   const row = (label, val) => val
     ? `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">${label}</td>
@@ -108,9 +108,10 @@ export async function sendLeadEmail({ name, hotel, phone, email, city, plan, mes
     ${row('Ism', name)}
     ${row('Mehmonxona', hotel)}
     ${row('Telefon', phone)}
+    ${row('Davlat', country)}
     ${row('Email', email)}
     ${row('Shahar', city)}
-    ${row('Reja', plan)}
+    ${row('Turi', plan)}
     ${row('Xabar', message)}
   </table>
   <p style="margin-top:20px;font-size:12px;color:#9ca3af">

@@ -4,12 +4,13 @@ import { sendLeadEmail } from '../services/email.service.js';
 // Landing formasidan kelgan bog'lanish so'rovi (lead) → egasi pochtasiga email.
 
 const leadSchema = z.object({
-  name: z.string().min(2).max(120),
+  name: z.string().max(120).optional().or(z.literal('')),
   hotel: z.string().max(160).optional().or(z.literal('')),
   phone: z.string().min(5).max(40),
+  country: z.string().max(80).optional().or(z.literal('')), // telefon qaysi davlatdan
   email: z.string().email().optional().or(z.literal('')),
   city: z.string().max(120).optional().or(z.literal('')),
-  plan: z.string().max(40).optional().or(z.literal('')),
+  plan: z.string().max(60).optional().or(z.literal('')),
   message: z.string().max(2000).optional().or(z.literal('')),
   // Bot tuzog'i (honeypot) — odam to'ldirmaydi, bot to'ldiradi.
   website: z.string().optional(),
@@ -49,9 +50,10 @@ export async function submitLead(req, res, next) {
       name: data.name,
       hotel: data.hotel,
       phone: data.phone,
+      country: data.country,
       email: data.email,
       city: data.city,
-      plan: data.plan || 'Yillik reja',
+      plan: data.plan || 'So\'rov',
       message: data.message,
     });
 
