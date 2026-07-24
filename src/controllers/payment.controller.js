@@ -156,15 +156,19 @@ const cardSchema = z.object({
   paymentId: z.string(),
   cardNumber: z.string().min(12),
   expiry: z.string().min(4), // "MM/YY", "MMYY" yoki "YYMM"
+  saveCard: z.boolean().optional(), // kartani eslab qolish (avto-to'lov)
 });
 
 /**
- * POST /api/payments/card   { paymentId, cardNumber, expiry }
+ * POST /api/payments/card   { paymentId, cardNumber, expiry, saveCard? }
  * 2-qadam: karta ma'lumotini yuboradi → kartaga SMS-OTP keladi.
+ *
+ * saveCard=true bo'lsa BIND oqimi ishlatiladi (bir OTP ham kartani bog'laydi,
+ * ham birinchi to'lovni amalga oshiradi) — keyingi oylar OTP'siz yechiladi.
  */
 export async function submitCard(req, res, next) {
   try {
-    const { paymentId, cardNumber, expiry } = cardSchema.parse(req.body);
+    const { paymentId, cardNumber, expiry, saveCard } = cardSchema.parse(req.body);
     const payment = await findOwnPayment(paymentId, req.user._id);
 
     if (!['created', 'otp_sent', 'failed'].includes(payment.status)) {
@@ -172,6 +176,18 @@ export async function submitCard(req, res, next) {
     }
 
     const expiryYYMM = atmos.normalizeExpiry(expiry);
+
+    if (saveCard) {
+      // BIND: kartani bog'lash boshlanadi — SMS-OTP shu yerda ketadi.
+      const { transactionId, raw } = await atmos.bindCardInit({ cardNumber, expiry: expiryYYMM });
+      payment.saveCard = true;
+      payment.bindTransactionId = transactionId;
+      payment.status = 'otp_sent';
+      payment.raw = { ...(payment.raw || {}), bindInit: raw };
+      await payment.save();
+      return res.json({ paymentId: payment._id, status: payment.status, saveCard: true, message: 'SMS-kod kartaga yuborildi' });
+    }
+
     const { raw } = await atmos.preApply({
       transactionId: payment.atmosTransactionId,
       cardNumber,
@@ -211,25 +227,77 @@ export async function confirmPayment(req, res, next) {
     }
 
     let result;
-    try {
-      result = await atmos.apply({ transactionId: payment.atmosTransactionId, otp });
-    } catch (err) {
-      // ATMOS rad etdi (OTP xato, mablag' yetarli emas, ...) — failed deb belgilamaymiz,
-      // foydalanuvchi qayta urinishi mumkin. Faqat xatoni qaytaramiz.
-      payment.errorCode = err.atmos?.code || null;
-      payment.errorMessage = err.atmos?.description || err.message;
-      await payment.save();
-      throw err;
+
+    if (payment.saveCard && payment.bindTransactionId) {
+      // ── BIND oqimi: OTP kartani bog'laydi (token) + birinchi to'lov ──
+      let bound;
+      try {
+        bound = await atmos.bindCardConfirm({ transactionId: payment.bindTransactionId, otp });
+      } catch (err) {
+        payment.errorCode = err.atmos?.code || null;
+        payment.errorMessage = err.atmos?.description || err.message;
+        await payment.save();
+        throw err;
+      }
+      if (!bound.cardToken) {
+        const e = new Error('Karta bog\'lanmadi — token kelmadi'); e.status = 502; throw e;
+      }
+
+      // Kartani foydalanuvchiga saqlaymiz + avto-to'lovni yoqamiz.
+      const provider = detectCardProvider(bound.pan);
+      await User.findByIdAndUpdate(payment.user, {
+        autoRenew: true,
+        renewFailCount: 0,
+        savedCard: {
+          provider,
+          token: bound.cardToken,
+          cardId: bound.cardId || null,
+          pan: bound.pan || null,
+          expiry: bound.expiry || null,
+          holder: bound.holder || null,
+          boundAt: new Date(),
+        },
+      });
+
+      // Birinchi to'lovni saqlangan token bilan darhol yechamiz (OTP'siz).
+      try {
+        result = await atmos.chargeWithSavedCard({
+          cardToken: bound.cardToken,
+          amount: payment.amount,
+          account: payment.account,
+          lang: req.user.lang || 'uz',
+        });
+      } catch (err) {
+        // Karta bog'landi, lekin yechish xato berdi — foydalanuvchi qayta urinishi mumkin.
+        payment.errorCode = err.atmos?.code || null;
+        payment.errorMessage = err.atmos?.description || err.message;
+        await payment.save();
+        throw err;
+      }
+      payment.cardPan = bound.pan || null;
+      payment.raw = { ...(payment.raw || {}), bindConfirm: bound.raw, charge: result.raw };
+    } else {
+      // ── Oddiy oqim: karta+OTP bilan bir martalik to'lov ──
+      try {
+        result = await atmos.apply({ transactionId: payment.atmosTransactionId, otp });
+      } catch (err) {
+        // ATMOS rad etdi (OTP xato, mablag' yetarli emas, ...) — failed deb belgilamaymiz,
+        // foydalanuvchi qayta urinishi mumkin. Faqat xatoni qaytaramiz.
+        payment.errorCode = err.atmos?.code || null;
+        payment.errorMessage = err.atmos?.description || err.message;
+        await payment.save();
+        throw err;
+      }
+      payment.cardPan = result.card_id || null;
+      payment.raw = { ...(payment.raw || {}), apply: result.raw };
     }
 
     payment.status = 'paid';
     payment.paidAt = new Date();
     payment.atmosSuccessTransId = result.success_trans_id;
-    payment.cardPan = result.card_id || null;
     payment.ofdUrl = result.ofd_url || null;
     payment.errorCode = null;
     payment.errorMessage = null;
-    payment.raw = { ...(payment.raw || {}), apply: result.raw };
     await payment.save();
 
     await activateSubscription(payment.user, payment.plan);
@@ -239,6 +307,7 @@ export async function confirmPayment(req, res, next) {
       status: 'paid',
       plan: payment.plan,
       ofdUrl: payment.ofdUrl,
+      saved: Boolean(payment.saveCard),
       message: 'To\'lov muvaffaqiyatli — obuna faollashtirildi',
     });
   } catch (err) {
@@ -372,7 +441,85 @@ export async function atmosCallback(req, res) {
   }
 }
 
+/**
+ * GET /api/payments/card — saqlangan karta (maskalangan) + avto-to'lov holati.
+ */
+export async function getSavedCard(req, res, next) {
+  try {
+    const user = await User.findById(req.user._id).select('savedCard autoRenew planExpiresAt');
+    const sc = user?.savedCard;
+    const hasCard = Boolean(sc && sc.pan);
+    res.json({
+      autoRenew: Boolean(user?.autoRenew),
+      planExpiresAt: user?.planExpiresAt || null,
+      card: hasCard
+        ? { provider: sc.provider, pan: sc.pan, expiry: sc.expiry, holder: sc.holder, boundAt: sc.boundAt }
+        : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * DELETE /api/payments/card — saqlangan kartani o'chirish + avto-to'lovni o'chirish.
+ */
+export async function removeSavedCard(req, res, next) {
+  try {
+    // Token bilan ATMOS tomonida ham o'chiramiz (xato bo'lsa ham davom etamiz).
+    const user = await User.findById(req.user._id).select('+savedCard.token savedCard');
+    const sc = user?.savedCard;
+    if (sc?.token && sc?.cardId) {
+      try {
+        await atmos.removeCard({ id: sc.cardId, token: sc.token });
+      } catch (e) {
+        console.warn('[payment] ATMOS removeCard xato:', e.message);
+      }
+    }
+    await User.findByIdAndUpdate(req.user._id, {
+      autoRenew: false,
+      renewFailCount: 0,
+      savedCard: { provider: null, token: null, cardId: null, pan: null, expiry: null, holder: null, boundAt: null },
+    });
+    res.json({ ok: true, message: 'Karta o\'chirildi, avto-to\'lov o\'chirildi' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+const autoRenewSchema = z.object({ enabled: z.boolean() });
+
+/**
+ * PATCH /api/payments/auto-renew   { enabled }
+ * Avto-to'lovni yoqish/o'chirish. Yoqish faqat saqlangan karta bo'lsa mumkin.
+ */
+export async function setAutoRenew(req, res, next) {
+  try {
+    const { enabled } = autoRenewSchema.parse(req.body);
+    const user = await User.findById(req.user._id).select('savedCard autoRenew');
+    if (enabled && !(user?.savedCard && user.savedCard.pan)) {
+      return res.status(400).json({ error: 'Avval kartani saqlang — keyin avto-to\'lovni yoqing' });
+    }
+    user.autoRenew = enabled;
+    if (enabled) user.renewFailCount = 0;
+    await user.save();
+    res.json({ ok: true, autoRenew: user.autoRenew });
+  } catch (err) {
+    handleErr(err, next);
+  }
+}
+
 // ─── Yordamchi funksiyalar ───────────────────────────────────────────
+
+// Karta PAN prefiksidan to'lov tizimini aniqlash.
+function detectCardProvider(pan) {
+  const d = String(pan || '').replace(/\D/g, '');
+  if (d.startsWith('9860')) return 'humo';
+  if (d.startsWith('8600')) return 'uzcard';
+  if (d.startsWith('4')) return 'visa';
+  if (/^5[1-5]/.test(d) || /^2[2-7]/.test(d)) return 'mastercard';
+  return 'card';
+}
 
 async function findOwnPayment(id, userId) {
   const payment = await Payment.findOne({ _id: id, user: userId });
@@ -385,7 +532,7 @@ async function findOwnPayment(id, userId) {
 }
 
 // Obunani faollashtirish: planni o'rnatish va muddatni uzaytirish.
-async function activateSubscription(userId, plan) {
+export async function activateSubscription(userId, plan) {
   const cfg = getPlan(plan);
   const user = await User.findById(userId);
   if (!user) return;

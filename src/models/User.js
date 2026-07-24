@@ -28,6 +28,27 @@ const userSchema = new mongoose.Schema(
     isActive: { type: Boolean, default: true },
     lastLoginAt: { type: Date, default: null },
     onboardingCompleted: { type: Boolean, default: false },
+
+    // ─── Avto-to'lov (recurring) — saqlangan karta bilan oylik yangilash ──
+    // Foydalanuvchi to'lov paytida "kartani eslab qol" katakchasini belgilasa
+    // yoqiladi. Kunlik cron obunasi tugayotgan autoRenew mijozlarni topib,
+    // saqlangan token/card_id orqali OTP'siz yechadi.
+    autoRenew: { type: Boolean, default: false },
+    savedCard: {
+      // 'humo' | 'uzcard' — token orqali (/merchant/pay + card_token)
+      // 'visa' | 'mastercard' — cardId orqali (/mps/pay template)
+      provider: { type: String, default: null },
+      // ATMOS card_token (Humo/UzCard). MAXFIY — select:false, toJSON'da yashiriladi.
+      token: { type: String, default: null, select: false },
+      cardId: { type: Number, default: null }, // Visa/MC (mps) card_id
+      pan: { type: String, default: null },    // maskalangan: 986009******1840
+      expiry: { type: String, default: null }, // YYMM
+      holder: { type: String, default: null },
+      boundAt: { type: Date, default: null },
+    },
+    // Oxirgi avto-yangilash urinishi (cron holati/monitoring uchun)
+    lastRenewAttemptAt: { type: Date, default: null },
+    renewFailCount: { type: Number, default: 0 },
   },
   { timestamps: true },
 );
@@ -46,6 +67,8 @@ userSchema.methods.toJSON = function () {
   const obj = this.toObject();
   delete obj.password;
   delete obj.__v;
+  // Karta tokeni hech qachon tashqariga chiqmaydi.
+  if (obj.savedCard) delete obj.savedCard.token;
   return obj;
 };
 

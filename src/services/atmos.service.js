@@ -221,6 +221,98 @@ export async function reverse({ transactionId, reason = 'refund' }) {
   return { transaction_id: data.transaction_id, raw: data };
 }
 
+// ─── Karta bog'lash (bind) + avto-to'lov — Humo/UzCard ──────────────
+/**
+ * Kartani bog'lash boshlanishi: karta raqami + muddatni yuborib, SMS-OTP oladi.
+ * @param expiry "YYMM" (masalan 02/28 → "2802")
+ * @returns {Promise<{transactionId:number, phone:string, raw:object}>}
+ */
+export async function bindCardInit({ cardNumber, expiry }) {
+  const body = {
+    card_number: String(cardNumber).replace(/\s+/g, ''),
+    expiry: String(expiry),
+  };
+  const data = await authPost('/partner/bind-card/init', body);
+  ensureOk(data, 'bind-card/init');
+  return { transactionId: data.transaction_id, phone: data.phone || null, raw: data };
+}
+
+/**
+ * Bog'lashni OTP bilan tasdiqlash — card_token qaytadi (saqlanadi).
+ * @returns {Promise<{cardToken, cardId, pan, expiry, holder, phone, raw}>}
+ */
+export async function bindCardConfirm({ transactionId, otp }) {
+  const body = { transaction_id: Number(transactionId), otp: String(otp) };
+  const data = await authPost('/partner/bind-card/confirm', body);
+  ensureOk(data, 'bind-card/confirm');
+  const d = data.data || {};
+  return {
+    cardToken: d.card_token ?? null,
+    cardId: d.card_id ?? null,
+    pan: d.pan ?? null,
+    expiry: d.expiry ?? null,
+    holder: d.card_holder ?? null,
+    phone: d.phone ?? null,
+    raw: data,
+  };
+}
+
+/** Bog'langan kartalar ro'yxati. */
+export async function listCards({ page = 1, pageSize = 20 } = {}) {
+  const data = await authPost('/partner/list-cards', { page, page_size: pageSize });
+  ensureOk(data, 'list-cards');
+  return { cards: data.cardDataSmallList || [], raw: data };
+}
+
+/** Bog'langan kartani o'chirish. */
+export async function removeCard({ id, token }) {
+  const body = { id: Number(id), token: String(token) };
+  const data = await authPost('/partner/remove-card', body);
+  ensureOk(data, 'remove-card');
+  return { raw: data };
+}
+
+/**
+ * SAQLANGAN KARTA bilan avtomatik yechish (OTP'siz) — Humo/UzCard.
+ * Oqim: create → pre-apply(card_token) → apply(otp='111111').
+ * Bog'langan karta uchun ATMOS real SMS so'ramaydi, otp o'rniga '111111'.
+ * @returns {Promise<{success_trans_id, card_id, ofd_url, raw}>}
+ */
+export async function chargeWithSavedCard({ cardToken, amount, account, lang = 'uz' }) {
+  // 1) chernovik tranzaksiya
+  const createBody = {
+    amount, account: String(account), store_id: Number(env.ATMOS_STORE_ID), lang,
+  };
+  if (env.ATMOS_TERMINAL_ID) createBody.terminal_id = env.ATMOS_TERMINAL_ID;
+  const created = await authPost('/merchant/pay/create', createBody);
+  ensureOk(created, 'create');
+  const transactionId = created.transaction_id;
+
+  // 2) pre-apply — card_number o'rniga card_token (bog'langan karta)
+  const pre = await authPost('/merchant/pay/pre-apply', {
+    card_token: String(cardToken),
+    store_id: Number(env.ATMOS_STORE_ID),
+    transaction_id: Number(transactionId),
+  });
+  ensureOk(pre, 'pre-apply(token)');
+
+  // 3) apply — bog'langan karta uchun otp = '111111' (real SMS emas)
+  const applied = await authPost('/merchant/pay/apply', {
+    transaction_id: Number(transactionId),
+    otp: '111111',
+    store_id: Number(env.ATMOS_STORE_ID),
+  });
+  ensureOk(applied, 'apply(token)');
+  const st = applied.store_transaction || {};
+  return {
+    transaction_id: transactionId,
+    success_trans_id: st.success_trans_id ?? null,
+    card_id: st.card_id ?? null,
+    ofd_url: applied.ofd_url ?? null,
+    raw: applied,
+  };
+}
+
 // Toshkent vaqti (UTC+5, DST yo'q) bo'yicha "yyyy-MM-ddTHH:mm:ss" sana.
 // minFromNow — necha daqiqa keyin (invoys muddati).
 function atmosLocalDate(minFromNow = 0) {

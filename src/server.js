@@ -7,6 +7,7 @@ import { initSecurity } from './services/security.service.js';
 import { startCompetitorMonitor } from './services/competitorMonitor.service.js';
 import { startWeeklyRefresh } from './services/weeklyRefresh.service.js';
 import { startXoteloMonitor } from './services/xoteloMonitor.service.js';
+import { startSubscriptionRenewal } from './services/subscriptionRenewal.service.js';
 import { initSocket } from './services/socket.service.js';
 
 const require = createRequire(import.meta.url);
@@ -38,6 +39,7 @@ async function start() {
     // sharh haftada bir marta olinadi (kam token).
     startWeeklyRefresh();
     startXoteloMonitor(); // Har kuni 00:00 — ertaga+indin Xotelo narxlari
+    startSubscriptionRenewal(); // Har kuni 09:00 — saqlangan karta bilan avto-to'lov
   });
 }
 

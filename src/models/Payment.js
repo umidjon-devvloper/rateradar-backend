@@ -42,6 +42,13 @@ const paymentSchema = new mongoose.Schema(
     invoiceToken: { type: String, default: null },
     checkoutUrl: { type: String, default: null }, // ATMOS to'lov sahifasi havolasi
 
+    // Karta bog'lash (avto-to'lov). saveCard=true bo'lsa bind oqimi ishlaydi:
+    // bind-card/init (OTP) → bind-card/confirm (token) → token bilan yechish.
+    saveCard: { type: Boolean, default: false },
+    bindTransactionId: { type: Number, default: null }, // /partner/bind-card transaction_id
+    // Cron avto-yangilashi yaratgan to'lovni belgilaydi (qo'lda emas).
+    isRenewal: { type: Boolean, default: false },
+
     status: {
       type: String,
       enum: ['created', 'otp_sent', 'paid', 'failed', 'reversed'],

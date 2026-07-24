@@ -10,6 +10,9 @@ import {
   listMyPayments,
   getPayment,
   atmosCallback,
+  getSavedCard,
+  removeSavedCard,
+  setAutoRenew,
 } from '../controllers/payment.controller.js';
 
 const router = Router();
@@ -139,6 +142,20 @@ router.post('/card', submitCard);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.post('/confirm', confirmPayment);
+
+/**
+ * @openapi
+ * /payments/card (GET):
+ *   get:
+ *     tags: [Payments]
+ *     summary: Saqlangan karta (maskalangan) + avto-to'lov holati
+ *     responses:
+ *       200: { description: "{ card, autoRenew, planExpiresAt }" }
+ */
+// DIQQAT: bu marshrutlar '/:id' dan OLDIN turishi shart (aks holda 'card' id sifatida ushlanadi).
+router.get('/card', getSavedCard);
+router.delete('/card', removeSavedCard);
+router.patch('/auto-renew', setAutoRenew);
 
 /**
  * @openapi
