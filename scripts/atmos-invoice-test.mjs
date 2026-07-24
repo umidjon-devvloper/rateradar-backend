@@ -1,12 +1,12 @@
 /**
- * ATMOS Invoice/Checkout (Visa/Mastercard) — item-format aniqlash testi.
+ * ATMOS Invoice — DETAILS bilan item-format aniqlash (2-bosqich).
  *
  * ISHLATISH (production serverda, backend papkadan):
  *   node scripts/atmos-invoice-test.mjs
  *
- * Bir necha item-format variantini ketma-ket sinaydi va qaysi biri
- * SUCCESS (url qaytaradi) berishini ko'rsatadi. -4 = "amount != items"
- * (item monetar maydoni ATMOS kutgan nom bilan mos emas).
+ * 1-bosqichda aniqlandi: item monetar maydoni = `amount`, va `details`
+ * massivi MAJBURIY (yo'q bo'lsa -999999). Bu bosqich `details`'ning
+ * qaysi minimal ko'rinishi ishlashini topadi.
  */
 import 'dotenv/config';
 import { env } from '../src/config/env.js';
@@ -18,7 +18,6 @@ const AMOUNT = 100000; // 1 000 so'm tiyinda
 
 console.log('STORE_ID :', STORE, ' BASE:', BASE, '\n');
 
-// ── token ──
 const basic = Buffer.from(`${env.ATMOS_CONSUMER_KEY}:${env.ATMOS_CONSUMER_SECRET}`).toString('base64');
 const { data: tok } = await axios.post(`${BASE}/token`, 'grant_type=client_credentials', {
   headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -32,13 +31,22 @@ function localDate(min = 60) {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }
 
-// Sinaladigan item-format variantlari:
+// Hammasida amount summasi = invoice AMOUNT. Faqat `details` ko'rinishi farq qiladi.
+const base = { items_id: '1', name: 'RateRadar Pro', amount: AMOUNT, quantity: 1 };
 const variants = {
-  'A: {items_id,name,amount,quantity} (joriy kod)': [{ items_id: '1', name: 'RateRadar', amount: AMOUNT, quantity: 1 }],
-  'B: {item_id,name,price,count}': [{ item_id: '1', name: 'RateRadar', price: AMOUNT, count: 1 }],
-  'C: {name,price,quantity}': [{ name: 'RateRadar', price: AMOUNT, quantity: 1 }],
-  'D: {name,amount} (quantitysiz)': [{ name: 'RateRadar', amount: AMOUNT }],
-  'E: items=[] (bo\'sh)': [],
+  'F: details=[] (bo\'sh massiv)': [{ ...base, details: [] }],
+  'G: details=[{name:package_code}]': [{ ...base, details: [{ name: 'package_code', values: '10305001001000000' }] }],
+  'H: to\'liq details (hujjat misoli)': [{
+    ...base, code: 'RRPRO',
+    details: [
+      { name: 'package_code', values: '10305001001000000' },
+      { name: 'mark_code', values: '' },
+      { name: 'tin', values: '' },
+      { name: 'discount', values: '0' },
+      { name: 'quantity', values: '1' },
+    ],
+  }],
+  'I: details=[{name:quantity,values:1}]': [{ ...base, details: [{ name: 'quantity', values: '1' }] }],
 };
 
 let winner = null;
@@ -56,7 +64,7 @@ for (const [label, items] of Object.entries(variants)) {
     const code = data?.status?.code;
     if (code === undefined || code === 'OK' || String(code) === '0') {
       console.log(`✅ ${label}\n   url: ${data.url}\n   payment_id: ${data.payment_id}`);
-      if (!winner) winner = label;
+      if (!winner) winner = { label, items };
     } else {
       const desc = data?.status?.locale?.uz || data?.status?.description || '';
       console.log(`❌ ${label} → code ${code} ${desc}`);
@@ -67,5 +75,9 @@ for (const [label, items] of Object.entries(variants)) {
 }
 
 console.log('\n──────────────');
-if (winner) console.log('ISHLAYDIGAN FORMAT:', winner, '\n→ payment.controller.js shu formatda bo\'lsin.');
-else console.log('Hech biri ishlamadi — ATMOS item-schema hujjatini so\'rash kerak.');
+if (winner) {
+  console.log('ISHLAYDIGAN FORMAT:', winner.label);
+  console.log('items namunasi:', JSON.stringify(winner.items, null, 2));
+} else {
+  console.log('Hech biri ishlamadi — natijani menga yuboring.');
+}
