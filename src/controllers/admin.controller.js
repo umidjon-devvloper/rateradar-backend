@@ -295,13 +295,26 @@ export async function recentActivity(req, res, next) {
 // Summalar TIYINDA saqlanadi (1 so'm = 100 tiyin) — UI so'mga aylantiradi.
 export async function listTransactions(req, res, next) {
   try {
-    const { page = 1, limit = 50, status = "", plan = "", channel = "", search = "" } = req.query;
+    const { page = 1, limit = 50, status = "", plan = "", channel = "", search = "", month = "", kind = "" } = req.query;
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const filter = {};
     if (status) filter.status = status;
     if (plan) filter.plan = plan;
     if (channel) filter.channel = channel;
+    // kind: 'renewal' — faqat avto-yangilashlar, 'manual' — qo'lda to'lovlar
+    if (kind === "renewal") filter.isRenewal = true;
+    else if (kind === "manual") filter.isRenewal = { $ne: true };
+
+    // Oy bo'yicha filtr: month = "YYYY-MM" (o'sha oyning boshidan keyingi oy boshigача).
+    let monthRange = null;
+    if (/^\d{4}-\d{2}$/.test(month)) {
+      const [y, m] = month.split("-").map(Number);
+      const start = new Date(Date.UTC(y, m - 1, 1));
+      const end = new Date(Date.UTC(y, m, 1));
+      filter.createdAt = { $gte: start, $lt: end };
+      monthRange = { start, end };
+    }
 
     // Qidiruv: foydalanuvchi email/ism, yoki account / cardPan bo'yicha.
     if (search) {
@@ -316,7 +329,7 @@ export async function listTransactions(req, res, next) {
       ];
     }
 
-    const [items, total, summary] = await Promise.all([
+    const [items, total, summary, filteredAgg, monthsAgg] = await Promise.all([
       Payment.find(filter)
         .populate("user", "name email plan countryCode")
         .sort({ createdAt: -1 })
@@ -326,13 +339,31 @@ export async function listTransactions(req, res, next) {
       Payment.countDocuments(filter),
       // Umumiy ko'rsatkichlar (filtrdan mustaqil): tushum va status taqsimoti.
       Payment.aggregate([
+        { $group: { _id: "$status", count: { $sum: 1 }, amount: { $sum: "$amount" } } },
+      ]),
+      // Joriy FILTR bo'yicha tushum/soni (tanlangan oy kartasi uchun).
+      Payment.aggregate([
+        { $match: filter },
         {
           $group: {
-            _id: "$status",
-            count: { $sum: 1 },
-            amount: { $sum: "$amount" },
+            _id: null,
+            paidAmount: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$amount", 0] } },
+            paidCount: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] } },
+            total: { $sum: 1 },
           },
         },
+      ]),
+      // Mavjud oylar ro'yxati (dropdown uchun) — har oy tushumi bilan.
+      Payment.aggregate([
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m", date: "$createdAt" } },
+            count: { $sum: 1 },
+            paidAmount: { $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$amount", 0] } },
+          },
+        },
+        { $sort: { _id: -1 } },
+        { $limit: 24 },
       ]),
     ]);
 
@@ -342,13 +373,18 @@ export async function listTransactions(req, res, next) {
       byStatus[s._id] = { count: s.count, amount: s.amount };
       if (s._id === "paid") paidRevenue = s.amount;
     }
+    const f = filteredAgg[0] || { paidAmount: 0, paidCount: 0, total: 0 };
 
     res.json({
       transactions: items,
       total,
       page: parseInt(page),
       pages: Math.ceil(total / limit),
-      summary: { byStatus, paidRevenue }, // amount tiyinda
+      // amount tiyinda. summary — global; filtered — joriy filtr (oy) bo'yicha.
+      summary: { byStatus, paidRevenue },
+      filtered: { paidRevenue: f.paidAmount, paidCount: f.paidCount, total: f.total },
+      months: monthsAgg.map((m) => ({ month: m._id, count: m.count, paidRevenue: m.paidAmount })),
+      monthRange,
     });
   } catch (err) {
     next(err);
