@@ -11,7 +11,7 @@ function createTransport() {
   });
 }
 
-export async function sendMail({ to, subject, html }) {
+export async function sendMail({ to, subject, html, replyTo }) {
   const transport = createTransport();
   if (!transport) {
     console.log('[email] SMTP sozlanmagan — xabar yuborilmadi:', subject);
@@ -22,6 +22,7 @@ export async function sendMail({ to, subject, html }) {
     to,
     subject,
     html,
+    ...(replyTo ? { replyTo } : {}),
   });
   return true;
 }
@@ -84,6 +85,45 @@ export async function sendCompetitorPriceAlert({ userEmail, hotelName, yourPrice
     to: userEmail,
     subject: `TheHotelSaaS: ${changes.length} ta raqib narxi sizdan oshdi — ${hotelName}`,
     html,
+  });
+}
+
+// Landing formasidan kelgan lead (bog'lanish so'rovi) — mehmonxona egasiga.
+// Yillik reja uchun "Biz bilan bog'laning" formasi shu funksiyani ishlatadi.
+export async function sendLeadEmail({ name, hotel, phone, email, city, plan, message }) {
+  const to = env.LEADS_EMAIL || 'info@thehotelsaas.com';
+  const row = (label, val) => val
+    ? `<tr><td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;color:#6b7280;font-size:13px">${label}</td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;font-weight:600">${String(val).replace(/</g, '&lt;')}</td></tr>`
+    : '';
+  const html = `
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
+  <div style="background:linear-gradient(135deg,#6366f1,#8b5cf6);padding:24px;border-radius:12px;margin-bottom:20px">
+    <h1 style="color:#fff;margin:0;font-size:20px">📩 Yangi so'rov — TheHotelSaaS</h1>
+    <p style="color:#c7d2fe;margin:4px 0 0">Saytdagi formadan kelgan bog'lanish so'rovi</p>
+  </div>
+  <table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+    ${row('Ism', name)}
+    ${row('Mehmonxona', hotel)}
+    ${row('Telefon', phone)}
+    ${row('Email', email)}
+    ${row('Shahar', city)}
+    ${row('Reja', plan)}
+    ${row('Xabar', message)}
+  </table>
+  <p style="margin-top:20px;font-size:12px;color:#9ca3af">
+    Bu so'rov TheHotelSaaS landing sahifasidagi formadan avtomatik yuborildi.
+  </p>
+</body></html>`;
+
+  return sendMail({
+    to,
+    subject: `🆕 So'rov: ${name || 'Nomsiz'}${hotel ? ` — ${hotel}` : ''}${plan ? ` (${plan})` : ''}`,
+    html,
+    // Egasi to'g'ridan-to'g'ri "Reply" bossa mijozga borsin.
+    replyTo: email || undefined,
   });
 }
 

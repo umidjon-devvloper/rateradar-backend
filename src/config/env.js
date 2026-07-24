@@ -78,6 +78,8 @@ const schema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASS: z.string().optional(),
   SMTP_FROM: z.string().optional(),
+  // Landing formasidagi bog'lanish so'rovlari (lead) shu pochtaga keladi.
+  LEADS_EMAIL: z.string().default('info@thehotelsaas.com'),
 
   // ─── ATMOS to'lov shlyuzi (UzCard / Humo) ────────────────────────────
   // Kalitlar ATMOS tomonidan merchant ro'yxatdan o'tgach beriladi.
