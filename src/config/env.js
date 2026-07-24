@@ -88,6 +88,10 @@ const schema = z.object({
   ATMOS_STORE_ID: z.string().optional(),       // merchant (store) id
   ATMOS_TERMINAL_ID: z.string().optional(),    // ixtiyoriy — 1 terminal bo'lsa shart emas
   ATMOS_API_KEY: z.string().optional(),        // Callback imzosini (sign) tekshirish uchun
+  // Invoice/Checkout (Visa/MC) uchun ИКПУ — soliq fiskal mahsulot kodi.
+  // ATMOS items[].details.package_code sifatida yuboriladi (MAJBURIY).
+  // To'g'ri ИКПУ merchant soliq ro'yxatiga bog'liq — buxgalter/ATMOS bilan tasdiqlang.
+  ATMOS_PACKAGE_CODE: z.string().default('10305001001000000'),
 });
 
 const parsed = schema.safeParse(process.env);

@@ -24,8 +24,8 @@ export function listPlans(req, res) {
       durationDays: p.durationDays,
     })),
     atmosReady: atmos.isAtmosConfigured(),
-    // To'lov usullari holati — frontend "Humo faol, Visa tez orada" ko'rsatadi.
-    methods: { humo: 'active', visa: 'coming_soon' },
+    // To'lov usullari holati — Humo (karta+OTP) va Visa/MC (invoice sahifasi) faol.
+    methods: { humo: 'active', visa: 'active' },
     // Sandbox karta faqat developmentda ko'rsatiladi.
     ...(env.NODE_ENV !== 'production'
       ? { testCard: { pan: '9860090101014364', expiry: '02/28', otp: '111111' } }
@@ -120,12 +120,17 @@ export async function createInvoice(req, res, next) {
       account,
       requestId: account, // noyob
       successUrl: returnUrl,
+      // ATMOS invoice item formati (jonli tekshiruvda aniqlangan):
+      //   • item summasi = `amount` (tiyin), yig'indisi invoice amount'ga TENG bo'lishi shart
+      //   • `details` — OBYEKT (massiv emas), snake_case kalitlar
+      //   • package_code (ИКПУ) MAJBURIY — bo'lmasa -999999 System error
       items: [
         {
           items_id: '1',
           name: `TheHotelSaaS ${planCfg.name}`,
           amount,
           quantity: 1,
+          details: { package_code: env.ATMOS_PACKAGE_CODE },
         },
       ],
     });

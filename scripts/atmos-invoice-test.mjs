@@ -1,72 +1,48 @@
 /**
- * ATMOS Invoice — details format diagnostikasi (3-bosqich).
- * Har variant uchun ATMOS'ning TO'LIQ xom javobini chiqaradi.
+ * ATMOS Invoice — YAKUNIY tasdiqlash testi.
+ *
+ * Real to'lov kodidagi (payment.controller.js) AYNAN o'sha formatni yuboradi:
+ *   items[].details = OBYEKT { package_code }, item.amount summasi = invoice amount.
+ *
+ * ISHLATISH (production serverda, backend papkadan):
  *   node scripts/atmos-invoice-test.mjs
+ *
+ * ✅ SUCCESS + checkout.atmos.uz url  →  Visa/MC to'lovi to'liq ishlaydi.
  */
 import 'dotenv/config';
 import { env } from '../src/config/env.js';
-import axios from 'axios';
+import { createInvoice, isAtmosConfigured } from '../src/services/atmos.service.js';
 
-const BASE = env.ATMOS_BASE_URL || 'https://apigw.atmos.uz';
-const STORE = Number(env.ATMOS_STORE_ID);
-const AMOUNT = 100000;
+console.log('ATMOS configured :', isAtmosConfigured());
+console.log('STORE_ID         :', env.ATMOS_STORE_ID);
+console.log('PACKAGE_CODE     :', env.ATMOS_PACKAGE_CODE);
+console.log('');
 
-console.log('STORE_ID :', STORE, ' BASE:', BASE, '\n');
+const AMOUNT = 100000; // 1 000 so'm (tiyin) — test summa
+const account = 'atmostest' + String(process.hrtime.bigint()).slice(-9);
 
-const basic = Buffer.from(`${env.ATMOS_CONSUMER_KEY}:${env.ATMOS_CONSUMER_SECRET}`).toString('base64');
-const { data: tok } = await axios.post(`${BASE}/token`, 'grant_type=client_credentials', {
-  headers: { Authorization: `Basic ${basic}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-  timeout: 30000,
-});
-const token = tok.access_token;
-
-function localDate(min = 60) {
-  const d = new Date(Date.now() + 5 * 3600e3 + min * 60e3);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
-}
-
-const base = { items_id: '1', name: 'RateRadar Pro', amount: AMOUNT, quantity: 1 };
-const variants = {
-  // details ichida `value` (birlik)
-  'J: details value (birlik)': [{ ...base, details: [{ name: 'package_code', value: '10305001001000000' }] }],
-  // details ichida `values` massiv sifatida
-  'K: values massiv': [{ ...base, details: [{ name: 'package_code', values: ['10305001001000000'] }] }],
-  // details — obyekt (massiv emas)
-  'L: details obyekt': [{ ...base, details: { package_code: '10305001001000000' } }],
-  // details YO'Q, lekin expiration_time qo'shilgan (hujjat misolida bor)
-  'M: details yo\'q + expiration_time': [{ ...base }],
-  // faqat majburiy minimal: items_id + name + amount (quantity/details yo'q)
-  'N: minimal items_id+name+amount': [{ items_id: '1', name: 'RateRadar Pro', amount: AMOUNT }],
-};
-
-let winner = null;
-for (const [label, items] of Object.entries(variants)) {
-  const rid = 'test' + String(process.hrtime.bigint()).slice(-9);
-  const body = {
-    request_id: rid, store_id: STORE, account: rid, amount: AMOUNT,
-    expiration_time: 60,
-    success_url: 'https://thehotelsaas.com/billing',
-    expiration_date: localDate(60), items,
-  };
-  try {
-    const { data } = await axios.post(`${BASE}/checkout/invoice/create`, body, {
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, timeout: 60000,
-    });
-    const code = data?.status?.code;
-    const ok = code === undefined || code === 'OK' || String(code) === '0';
-    console.log(`${ok ? '✅' : '❌'} ${label}`);
-    console.log('   RAW:', JSON.stringify(data));
-    if (ok && !winner) winner = { label, items };
-  } catch (e) {
-    console.log(`⚠️  ${label} → ${e.response ? JSON.stringify(e.response.data) : e.message}`);
-  }
-}
-
-console.log('\n──────────────');
-if (winner) {
-  console.log('ISHLAYDIGAN FORMAT:', winner.label);
-  console.log('items:', JSON.stringify(winner.items, null, 2));
-} else {
-  console.log('Hech biri ishlamadi — yuqoridagi RAW javoblarni menga yuboring.');
+try {
+  const r = await createInvoice({
+    amount: AMOUNT,
+    account,
+    requestId: account,
+    successUrl: `https://thehotelsaas.com/billing?pay=${account}`,
+    items: [
+      {
+        items_id: '1',
+        name: 'TheHotelSaaS Pro',
+        amount: AMOUNT,
+        quantity: 1,
+        details: { package_code: env.ATMOS_PACKAGE_CODE },
+      },
+    ],
+  });
+  console.log('✅ SUCCESS — Visa/MC invoice YARATILDI.');
+  console.log('   url        :', r.url);
+  console.log('   payment_id :', r.payment_id);
+  console.log('   token      :', r.token);
+  console.log('\nShu url\'ni brauzerda ochib Visa karta bilan sinab ko\'rsangiz bo\'ladi.');
+} catch (e) {
+  console.log('❌ FAILED:', e.message);
+  if (e.atmos?.raw) console.log('   ATMOS javobi:', JSON.stringify(e.atmos.raw));
 }
