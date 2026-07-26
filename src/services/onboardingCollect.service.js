@@ -36,6 +36,36 @@ async function setProgress(hotelId, userId, patch) {
   emitToUser(userId, 'collect:progress', { hotelId: String(hotelId), ...progress });
 }
 
+// Xona turlarini ORQADA yig'adi (modal allaqachon yopilgan). Sekin Booking
+// skreypi bo'lgani uchun 45s bilan cheklaymiz — qotib qolsa ham resurs ushlamaydi.
+function collectRoomsInBackground(hotelId, name, city) {
+  (async () => {
+    try {
+      const { scraperEnabled, scraperRooms } = await import('./hotelScraper.service.js');
+      if (!scraperEnabled()) return;
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('rooms timeout')), 45_000));
+      const sr = await Promise.race([scraperRooms(name, city), timeout]);
+      if (sr?.rooms?.length) {
+        const roomTypes = sr.rooms.slice(0, 8).map((r) => ({
+          name: r.name, guests: r.guests, sqm: 0, description: '', basePrice: r.price,
+        }));
+        // roomTypes doim yangilanadi.
+        await Hotel.updateOne({ _id: hotelId }, { $set: { roomTypes } }).catch(() => {});
+        // currentPrice — FAQAT Scrape.do (runInstantSnapshot) narx qo'ymagan bo'lsa
+        // (narxi yo'q kichik hotel uchun fallback). Scrape.do narxini USTIDAN yozmaymiz.
+        if (sr.minPrice > 0) {
+          await Hotel.updateOne(
+            { _id: hotelId, $or: [{ currentPrice: { $lte: 0 } }, { currentPrice: null }] },
+            { $set: { currentPrice: sr.minPrice, currency: sr.currency || 'USD' } },
+          ).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn(`[collect] xona (orqa fon): ${e.message}`);
+    }
+  })();
+}
+
 async function runCollect(hotelId, userId, { lat, lng }) {
   await Hotel.updateOne({ _id: hotelId }, { $set: { collectStatus: 'collecting' } }).catch(() => {});
   await setProgress(hotelId, userId, { step: 'start', pct: 5, label: 'Ma\'lumotlar yig\'ilmoqda' });
@@ -61,33 +91,19 @@ async function runCollect(hotelId, userId, { lat, lng }) {
       console.warn(`[collect] sharh: ${e.message}`),
     );
 
-    // ── 3. Xona turlari (Rate Shopper) — Booking property sahifasidan ──
-    // Onboarding'da Rate Shopper ham to'lsin (foydalanuvchi alohida bosmasin).
-    await setProgress(hotelId, userId, { step: 'rooms', pct: 90, label: 'Xona narxlari yig\'ilmoqda' });
-    try {
-      const { scraperEnabled, scraperRooms } = await import('./hotelScraper.service.js');
-      if (scraperEnabled()) {
-        const sr = await scraperRooms(hotel.name, hotel.city);
-        if (sr.rooms?.length) {
-          const roomTypes = sr.rooms.slice(0, 8).map((r) => ({
-            name: r.name, guests: r.guests, sqm: 0, description: '', basePrice: r.price,
-          }));
-          const upd = { roomTypes };
-          if (sr.minPrice > 0) { upd.currentPrice = sr.minPrice; upd.currency = sr.currency || 'USD'; }
-          await Hotel.updateOne({ _id: hotelId }, { $set: upd }).catch(() => {});
-        }
-      }
-    } catch (e) {
-      console.warn(`[collect] xona: ${e.message}`);
-    }
-
     // ── Tayyor ───────────────────────────────────────────────────────
+    // Narxlar + sharhlar keldi — modalni DARROV yopamiz. Xona turlari (sekin
+    // Booking skreypi) ni KUTMAYMIZ: u orqada (fire-and-forget) to'ladi.
+    // Aks holda scraper sekin/qotган bo'lsa modal 2 daqiqagacha ochiq qolardi.
     await Hotel.updateOne(
       { _id: hotelId },
       { $set: { collectStatus: 'ready', collectedAt: new Date() } },
     ).catch(() => {});
     await setProgress(hotelId, userId, { step: 'done', pct: 100, label: 'Tayyor' });
     emitToUser(userId, 'data:ready', { hotelId: String(hotelId) });
+
+    // ── Xona turlari (Rate Shopper) — ORQADA, modaldan keyin ──────────
+    collectRoomsInBackground(hotelId, hotel.name, hotel.city);
   } catch (err) {
     console.error(`[collect] ${hotelId} jarayon xatosi:`, err.message);
     await Hotel.updateOne({ _id: hotelId }, { $set: { collectStatus: 'error' } }).catch(() => {});
