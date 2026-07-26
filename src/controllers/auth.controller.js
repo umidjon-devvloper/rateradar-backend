@@ -80,7 +80,15 @@ export async function login(req, res, next) {
 }
 
 export async function me(req, res) {
-  res.json({ user: req.user });
+  // Tarif cheklovlarini ham qaytaramiz — frontend AI/kanal/raqib gating'ni
+  // shundan o'qiydi (yagona manba). Admin barcha cheklovdan ozod.
+  const { planLimits } = await import("../config/plans.js");
+  const isAdmin = req.user?.role === "admin";
+  const base = planLimits(req.user?.plan);
+  const limits = isAdmin
+    ? { maxCompetitors: 0, maxHotels: 0, channels: null, ai: true, reviewsReply: true, reviewsAnalytics: true, maxTv: 0, hotelService: true }
+    : base;
+  res.json({ user: req.user, limits });
 }
 
 export async function updateProfile(req, res, next) {

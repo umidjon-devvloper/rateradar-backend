@@ -50,3 +50,16 @@ start().catch((err) => {
 
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
+
+// ── GLOBAL XATO HIMOYASI (server yiqilmasin) ─────────────────────────
+// Node 24'da ushlanmagan promise rejection / xato jarayonni O'LDIRADI.
+// Ko'p fonда async ish bor (sekin scraper, Scrape.do, cron, background
+// refresh) — bittasi ushlanmasa BUTUN backend qulab, pm2 qayta ishga
+// tushirar edi (o'sha oynada barcha so'rov 502/CORS + WebSocket 502).
+// Bu yerda LOG qilamiz, lekin serverni tirik qoldiramiz.
+process.on("unhandledRejection", (reason) => {
+  console.error("[unhandledRejection]", reason?.stack || reason?.message || reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err?.stack || err?.message || err);
+});

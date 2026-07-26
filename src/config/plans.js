@@ -13,12 +13,14 @@
  * `free` — ichki holat (ro'yxatdan o'tgan, hali to'lamagan).
  */
 
-// Har tarifning funksiya cheklovlari. 0 = cheksiz.
+// Har tarifning funksiya cheklovlari. 0 = cheksiz. channels: null = barcha OTA;
+// massiv = faqat shu kanallar KO'RSATILADI (baza baribir hammasini saqlaydi).
+// reviewsAnalytics: sharhlar analitika dashboardi (Starter'da qulf).
 const LIMITS = {
-  free:     { maxCompetitors: 0,  maxHotels: 1, otaAll: false, ai: false, reviewsReply: false, maxTv: 0, hotelService: false },
-  starter:  { maxCompetitors: 3,  maxHotels: 1, otaAll: false, ai: false, reviewsReply: false, maxTv: 1, hotelService: false },
-  pro:      { maxCompetitors: 10, maxHotels: 1, otaAll: true,  ai: true,  reviewsReply: true,  maxTv: 5, hotelService: true },
-  business: { maxCompetitors: 0,  maxHotels: 5, otaAll: true,  ai: true,  reviewsReply: true,  maxTv: 0, hotelService: true },
+  free:     { maxCompetitors: 0,  maxHotels: 1, channels: ['booking'],            ai: false, reviewsReply: false, reviewsAnalytics: false, maxTv: 0, hotelService: false },
+  starter:  { maxCompetitors: 3,  maxHotels: 1, channels: ['booking', 'expedia'], ai: false, reviewsReply: false, reviewsAnalytics: false, maxTv: 1, hotelService: false },
+  pro:      { maxCompetitors: 10, maxHotels: 1, channels: null,                   ai: true,  reviewsReply: true,  reviewsAnalytics: true,  maxTv: 5, hotelService: true },
+  business: { maxCompetitors: 0,  maxHotels: 5, channels: null,                   ai: true,  reviewsReply: true,  reviewsAnalytics: true,  maxTv: 0, hotelService: true },
 };
 
 export const PLANS = {

@@ -110,10 +110,26 @@ export async function getCollectStatus(req, res, next) {
   try {
     const hotel = req.hotel;
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+
+    let status = hotel.collectStatus || 'ready';
+    let collectedAt = hotel.collectedAt || null;
+
+    // AUTO-HEAL: yig'ish 4 daqiqadan beri qotib qolgan bo'lsa (jarayon o'lgan/
+    // qayta ishga tushgan) — modalni abadiy ochiq qoldirmaymiz, 'ready' qilamiz.
+    if ((status === 'collecting' || status === 'pending')) {
+      const lastAt = hotel.collectProgress?.at || 0;
+      const stale = lastAt && Date.now() - lastAt > 4 * 60 * 1000;
+      if (stale || !lastAt) {
+        status = 'ready';
+        collectedAt = new Date();
+        Hotel.updateOne({ _id: hotel._id }, { $set: { collectStatus: 'ready', collectedAt } }).catch(() => {});
+      }
+    }
+
     res.json({
-      status: hotel.collectStatus || 'ready',
+      status,
       progress: hotel.collectProgress || {},
-      collectedAt: hotel.collectedAt || null,
+      collectedAt,
     });
   } catch (err) {
     next(err);
