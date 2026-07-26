@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.js';
 import { resolveHotel } from '../middleware/resolveHotel.js';
+import { requireFeature } from '../utils/planGate.js';
+
+// AI funksiyalari faqat Pro va Business tariflarida (Starter'da yo'q).
+const aiGate = requireFeature('ai', 'AI funksiyalari Pro va Business tariflarida mavjud');
 import {
   getAIStatus,
   aiPriceRecommendations,
@@ -37,7 +41,7 @@ router.get('/status', requireAuth, getAIStatus);
  *       200: { description: Narx tavsiyalari }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
-router.get('/price-recommendations', requireAuth, resolveHotel, aiPriceRecommendations);
+router.get('/price-recommendations', requireAuth, aiGate, resolveHotel, aiPriceRecommendations);
 
 /**
  * @openapi
@@ -51,7 +55,7 @@ router.get('/price-recommendations', requireAuth, resolveHotel, aiPriceRecommend
  *       200: { description: Sharhlar xulosasi }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
-router.get('/summarize-reviews', requireAuth, resolveHotel, aiSummarizeReviews);
+router.get('/summarize-reviews', requireAuth, aiGate, resolveHotel, aiSummarizeReviews);
 
 /**
  * @openapi
@@ -72,7 +76,7 @@ router.get('/summarize-reviews', requireAuth, resolveHotel, aiSummarizeReviews);
  *       200: { description: Tahlil natijasi }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
-router.post('/analyze-review', requireAuth, resolveHotel, aiAnalyzeSingleReview);
+router.post('/analyze-review', requireAuth, aiGate, resolveHotel, aiAnalyzeSingleReview);
 
 /**
  * @openapi
@@ -120,7 +124,7 @@ router.post('/chat', aiChatSupport);
  *       200: { description: "AI javobi { reply }" }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
-router.post('/assistant-chat', requireAuth, resolveHotel, aiAssistantChat);
+router.post('/assistant-chat', requireAuth, aiGate, resolveHotel, aiAssistantChat);
 
 /**
  * @openapi
@@ -137,6 +141,6 @@ router.post('/assistant-chat', requireAuth, resolveHotel, aiAssistantChat);
  *       200: { description: "{ summary, channels:[{channel, currentPrice, suggestedPrice, delta, action, reason, stats}] }" }
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
-router.get('/ota-advice', requireAuth, resolveHotel, aiOtaAdvice);
+router.get('/ota-advice', requireAuth, aiGate, resolveHotel, aiOtaAdvice);
 
 export default router;

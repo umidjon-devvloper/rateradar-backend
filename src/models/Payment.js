@@ -21,7 +21,11 @@ const paymentSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    plan: { type: String, enum: ['starter', 'pro', 'pro_yearly'], required: true },
+    plan: {
+      type: String,
+      enum: ['starter', 'pro', 'business', 'starter_yearly', 'pro_yearly', 'business_yearly'],
+      required: true,
+    },
     amount: { type: Number, required: true }, // tiyinda (1 so'm = 100 tiyin)
     currency: { type: String, default: 'UZS' },
 

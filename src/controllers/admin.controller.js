@@ -113,10 +113,15 @@ export async function grantUserPlan(req, res, next) {
     if (Number.isNaN(days) || days < 0 || days > 3650) {
       return res.status(400).json({ error: "days 0–3650 oralig'ida bo'lishi kerak (0 = doimiy)" });
     }
+    // Qaysi tarif beriladi — starter | pro | business (default pro).
+    const plan = String(req.body?.plan || "pro");
+    if (!["starter", "pro", "business"].includes(plan)) {
+      return res.status(400).json({ error: "plan: starter | pro | business bo'lishi kerak" });
+    }
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ error: "Topilmadi" });
 
-    user.plan = "pro";
+    user.plan = plan;
     if (days > 0) {
       // Faol obuna ustiga qo'shiladi; tugagan bo'lsa bugundan boshlanadi.
       const base =
@@ -129,7 +134,7 @@ export async function grantUserPlan(req, res, next) {
       user.planExpiresAt = null; // doimiy dostup
     }
     await user.save();
-    res.json({ user, granted: days === 0 ? "forever" : `${days}d` });
+    res.json({ user, plan, granted: days === 0 ? "forever" : `${days}d` });
   } catch (err) {
     next(err);
   }

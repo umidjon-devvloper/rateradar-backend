@@ -40,6 +40,14 @@ const escapeRegex = (s) => String(s).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&
 export async function createHotel(req, res, next) {
   try {
     const data = createHotelSchema.parse(req.body);
+
+    // ── TARIF CHEGARASI: mehmonxonalar soni (Starter/Pro 1, Business 5) ──
+    // Birinchi hotel onboardingda (free) yaratiladi — free limit 1, count 0 → ruxsat.
+    const { assertLimit } = await import('../utils/planGate.js');
+    const myHotels = await Hotel.countDocuments({ userId: req.user._id, isActive: true });
+    assertLimit(req.user, 'maxHotels', myHotels,
+      'Tarifingizda mehmonxona chegarasiga yetdingiz. Ko\'proq mehmonxona uchun Business tarifiga o\'ting.');
+
     // Multi-hotel: bitta foydalanuvchi bir nechta TURLI hotel qo'sha oladi.
     // Lekin BIR XIL mehmonxona (nom+shahar yoki osm/place ID bo'yicha) ikki marta
     // ro'yxatdan o'tolmaydi — boshqa egasi yoki o'zi tomonidan ham.
@@ -1615,6 +1623,12 @@ export async function addCompetitor(req, res, next) {
     const myHotel = req.hotel;
     if (!myHotel) return res.status(404).json({ error: 'Avval hotel yarating' });
     const data = req.body;
+
+    // ── TARIF CHEGARASI: raqiblar soni (Starter 3, Pro 10, Business cheksiz) ──
+    const { assertLimit } = await import('../utils/planGate.js');
+    const activeCount = await Competitor.countDocuments({ ownerHotelId: myHotel._id, isActive: true });
+    assertLimit(req.user, 'maxCompetitors', activeCount,
+      'Tarifingizda raqiblar chegarasiga yetdingiz. Ko\'proq raqib kuzatish uchun tarifni ko\'taring.');
 
     // Koordinata berilmagan bo'lsa (masalan skreyper natijasidan — typeahead tez
     // bo'lishi uchun geocode qilinmagan), shu yerda nom+manzil bo'yicha to'ldiramiz.

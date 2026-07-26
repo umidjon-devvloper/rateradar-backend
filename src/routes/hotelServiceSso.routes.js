@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { requireAuth } from "../middleware/auth.js";
 import { resolveHotel } from "../middleware/resolveHotel.js";
+import { planAllows } from "../config/plans.js";
 
 const router = Router();
 
@@ -19,6 +20,16 @@ const router = Router();
 router.get("/sso", requireAuth, resolveHotel, async (req, res) => {
   if (!req.hotel) {
     return res.status(400).json({ error: "Aktiv mehmonxona topilmadi" });
+  }
+
+  // Hotel Service faqat Pro va Business tariflarida (Starter'da YO'Q).
+  // Admin har doim kira oladi.
+  const isAdmin = req.user.role === "admin";
+  if (!isAdmin && !planAllows(req.user.plan, "hotelService")) {
+    return res.status(403).json({
+      error: "Hotel Service faqat Pro va Business tariflarida mavjud",
+      code: "PLAN_REQUIRED",
+    });
   }
 
   const payload = {

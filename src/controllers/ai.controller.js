@@ -10,9 +10,13 @@ import {
 } from "../services/openai.service.js";
 import { chatSupport, assistantChat, getOtaChannelAdvice, isGeminiEnabled } from "../services/gemini.service.js";
 import PriceSnapshot from "../models/PriceSnapshot.js";
+import { planAllows } from "../config/plans.js";
 
 export function getAIStatus(req, res) {
-  res.json({ enabled: isAIEnabled(), model: "gpt-4o-mini" });
+  // allowed — foydalanuvchi tarifida AI bormi (Starter'da yo'q). Frontend
+  // shuni o'qib AI tugmalarini yashiradi/qulflaydi.
+  const allowed = req.user?.role === 'admin' || planAllows(req.user?.plan, 'ai');
+  res.json({ enabled: isAIEnabled(), model: "gpt-4o-mini", allowed });
 }
 
 export async function aiPriceRecommendations(req, res, next) {

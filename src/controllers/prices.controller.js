@@ -837,6 +837,9 @@ async function persistOtaUrl(hotel, key, url) {
  * Bu Apify (har OTA alohida actor) o'rniga juda tejamli — N ta raqib × 1 ta SerpAPI = N so'rov.
  */
 export async function refreshAllChannels(req, res, next) {
+  // HTTP javob berilganini kuzatamiz — uzoq ish orqada davom etadi, shuning
+  // uchun xatoda ikki marta javob bermaslik uchun guard.
+  let responded = false;
   try {
     // SerpAPI YO'Q bo'lsa ham to'xtamaymiz — to'g'ridan-to'g'ri fallback (HasData/
     // Apify) va oxir-oqibat Booking.com JONLI SKREYPER orqali narx olamiz.
@@ -892,6 +895,14 @@ export async function refreshAllChannels(req, res, next) {
     };
 
     emitProgress({ stage: 'start', channels: TARGET_CHANNELS.map((c) => c.label) });
+
+    // ── HTTP so'rovni DARROV yopamiz (nginx/proxy 60s timeout oldini olish) ──
+    // Barcha kanal+raqib Scrape.do orqali 1-2 daqiqa olishi mumkin; agar HTTP
+    // so'rovni oxirigacha ushlab tursak, proksi ulanishni uzadi va brauzer buni
+    // "CORS/Network Error" deb ko'rsatadi. Ish orqada davom etadi, yakuniy
+    // natija socket `price:progress` {stage:'complete', summary} orqali keladi.
+    res.json({ started: true });
+    responded = true;
 
     // ── 1. O'z mehmonxona — 1 ta SerpAPI so'rovi ─────────────────────────
     emitProgress({ stage: 'own', status: 'searching' });
@@ -1208,6 +1219,12 @@ export async function refreshAllChannels(req, res, next) {
     await Hotel.updateOne({ _id: hotel._id }, { $set: { lastPriceRefreshedAt: new Date() } }).catch(() => {});
 
     emitProgress({ stage: 'complete', summary });
-    res.json(summary);
-  } catch (err) { next(err); }
+    // Javob allaqachon berilgan (started:true) — yakuniy natija socket orqali.
+    if (!responded) res.json(summary);
+  } catch (err) {
+    // Orqadagi ishda xato — foydalanuvchiga socket orqali bildiramiz.
+    try { emitToUser(req.user?._id, 'price:progress', { stage: 'error', message: err.message }); } catch { /* noop */ }
+    if (!responded) next(err);
+    else console.error('[refresh-all] orqa fon xatosi:', err.message);
+  }
 }
