@@ -32,6 +32,17 @@ const competitorSchema = new mongoose.Schema(
     otaUrls: { type: Object, default: {} },
     latestPrices: { type: Map, of: Number, default: {} },
     lastPriceFetchedAt: { type: Date, default: null },
+    // Xona turlari — raqibning Booking sahifasidan (nom+shahar) bir marta
+    // skreyp qilinadi. Foydalanuvchi qaysi xona qancha ekanini ko'radi.
+    roomTypes: {
+      type: [{
+        name: { type: String, default: "" },
+        price: { type: Number, default: 0 },
+        guests: { type: Number, default: 2 },
+      }],
+      default: [],
+    },
+    roomsFetchedAt: { type: Date, default: null },
     autoAdded: { type: Boolean, default: true },
     isActive: { type: Boolean, default: true },
   },

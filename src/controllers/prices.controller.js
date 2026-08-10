@@ -1219,6 +1219,28 @@ export async function refreshAllChannels(req, res, next) {
     await Hotel.updateOne({ _id: hotel._id }, { $set: { lastPriceRefreshedAt: new Date() } }).catch(() => {});
 
     emitProgress({ stage: 'complete', summary });
+
+    // ── Raqib XONA TURLARINI orqada yig'amiz (best-effort, sekin Booking skreyp) ──
+    // Narx refreshi tugadi; xonalar orqada trikl bo'lib to'ladi. Kuniga bir marta
+    // (roomsFetchedAt throttle), concurrency 2. Scraper bo'sh qaytsa jimgina o'tadi.
+    (async () => {
+      try {
+        const { collectCompetitorRooms } = await import('./hotel.controller.js');
+        const need = competitors.filter((c) => {
+          const t = c.roomsFetchedAt ? new Date(c.roomsFetchedAt).getTime() : 0;
+          return !t || Date.now() - t > 20 * 3600_000;
+        });
+        let cur = 0;
+        const workers = Array.from({ length: Math.min(2, need.length) }, async () => {
+          while (cur < need.length) {
+            const c = need[cur++];
+            await collectCompetitorRooms(c, hotel.city).catch(() => {});
+          }
+        });
+        await Promise.all(workers);
+      } catch (e) { console.warn('[refresh] raqib xonalari orqa fon:', e.message); }
+    })();
+
     // Javob allaqachon berilgan (started:true) — yakuniy natija socket orqali.
     if (!responded) res.json(summary);
   } catch (err) {

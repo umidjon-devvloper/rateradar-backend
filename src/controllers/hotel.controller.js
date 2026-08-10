@@ -2240,6 +2240,68 @@ export async function getCompetitorDetail(req, res, next) {
       otaPrices,
       history,
       ratingHistory,
+      roomTypes: (competitor.roomTypes || []).map((r) => (r.toObject ? r.toObject() : r)),
+      roomsFetchedAt: competitor.roomsFetchedAt || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Bitta raqibning XONA TURLARINI Booking sahifasidan skreyp qilib saqlaydi.
+ * Sekin (Booking skreyp) — 45s bilan cheklangan, bo'sh qaytsa eski saqlanadi.
+ * @returns {Promise<Array>} roomTypes
+ */
+export async function collectCompetitorRooms(competitor, city) {
+  try {
+    const { scraperEnabled, scraperRooms } = await import('../services/hotelScraper.service.js');
+    if (!scraperEnabled()) return competitor.roomTypes || [];
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('rooms timeout')), 45_000));
+    const sr = await Promise.race([scraperRooms(competitor.name, city || ''), timeout]);
+    if (sr?.rooms?.length) {
+      const roomTypes = sr.rooms.slice(0, 10).map((r) => ({
+        name: r.name || 'Room', price: Math.round(r.price || 0), guests: r.guests || 2,
+      })).filter((r) => r.price > 0);
+      if (roomTypes.length) {
+        competitor.roomTypes = roomTypes;
+        competitor.roomsFetchedAt = new Date();
+        await competitor.save().catch(() => {});
+        return roomTypes;
+      }
+    }
+  } catch (e) {
+    console.warn(`[comp-rooms] ${competitor?.name}: ${e.message}`);
+  }
+  return competitor.roomTypes || [];
+}
+
+/**
+ * POST /hotels/competitors/:id/rooms
+ * Raqib xona turlarini (Booking) yangilaydi — kuniga bir marta (throttle).
+ */
+export async function fetchCompetitorRooms(req, res, next) {
+  try {
+    const myHotel = req.hotel;
+    if (!myHotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    const competitor = await Competitor.findOne({ _id: req.params.id, ownerHotelId: myHotel._id, isActive: true });
+    if (!competitor) return res.status(404).json({ error: 'Raqib topilmadi' });
+
+    // Kunlik throttle — bir raqib xonalari kuniga bir marta yangilanadi.
+    const force = req.query.force === 'true' || req.body?.force === true;
+    const last = competitor.roomsFetchedAt ? new Date(competitor.roomsFetchedAt).getTime() : 0;
+    if (!force && last && Date.now() - last < 20 * 3600_000) {
+      return res.json({
+        throttled: true,
+        roomTypes: (competitor.roomTypes || []).map((r) => (r.toObject ? r.toObject() : r)),
+        roomsFetchedAt: competitor.roomsFetchedAt,
+      });
+    }
+
+    const roomTypes = await collectCompetitorRooms(competitor, myHotel.city);
+    res.json({
+      roomTypes: roomTypes.map((r) => (r.toObject ? r.toObject() : r)),
+      roomsFetchedAt: competitor.roomsFetchedAt || null,
     });
   } catch (err) {
     next(err);

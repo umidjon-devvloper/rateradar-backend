@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   createHotel, getMyHotel, updateMyHotel, listMyHotels,
-  getCompetitors, addCompetitor, deleteCompetitor, fetchCompetitorPrice, fetchCompetitorXoteloPrice, fetchCompetitorHasDataPrice, getCompetitorDetail,
+  getCompetitors, addCompetitor, deleteCompetitor, fetchCompetitorPrice, fetchCompetitorXoteloPrice, fetchCompetitorHasDataPrice, getCompetitorDetail, fetchCompetitorRooms,
   updateCompetitorOtaUrls, fetchCompetitorChannel,
   enrichMyHotel, getOtaPrices, getOtaChannels, getOtaChannelDetail, setOtaChannelPrice,
   fetchOtaChannel, fetchAllOtaChannels, findBookingUrlEndpoint,
@@ -506,5 +506,6 @@ router.post('/competitors/:id/fetch-channel', fetchCompetitorChannel);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.get('/competitors/:id/detail', getCompetitorDetail);
+router.post('/competitors/:id/rooms', fetchCompetitorRooms);
 
 export default router;
