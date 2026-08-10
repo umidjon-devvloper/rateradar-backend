@@ -53,6 +53,23 @@ function competitorChannelPrice(competitor, compKey) {
  * Returns a rate-shopper grid comparing the user's hotel price against each
  * active competitor for the next N days.
  */
+/**
+ * GET /prices/signals
+ * Narx signallari — raqib narxi NEGA o'zgardi (bozor/sezon vs shaxsiy to'lish
+ * vs occupancy). Mavjud PriceSnapshot + RoomSnapshot tarixidan hisoblanadi.
+ */
+export async function getPriceSignalsEndpoint(req, res, next) {
+  try {
+    const hotel = req.hotel;
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    const { getPriceSignals } = await import('../services/priceSignal.service.js');
+    const signals = await getPriceSignals(hotel._id);
+    res.json(signals);
+  } catch (err) {
+    next(err);
+  }
+}
+
 export async function getRateShopper(req, res, next) {
   try {
     const hotel = req.hotel;

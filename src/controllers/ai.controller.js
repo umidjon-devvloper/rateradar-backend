@@ -328,12 +328,22 @@ export async function aiOtaAdvice(req, res, next) {
     }
 
     const lang = req.query.lang || 'uz';
+
+    // NARX SIGNALI — raqib narxi nega o'zgardi (bozor/sezon vs shaxsiy to'lish).
+    // AI shu kontekstda "bozor ko'targan" vs "bitta raqib" farqini hisobga oladi.
+    let signal = null;
+    try {
+      const { getPriceSignals } = await import('../services/priceSignal.service.js');
+      signal = await getPriceSignals(hotel._id);
+    } catch { /* signal ixtiyoriy */ }
+
     const ai = await getOtaChannelAdvice({
       hotelName: hotel.name,
       stars: hotel.stars || 0,
       rating: hotel.rating || 0,
       channels,
       lang,
+      marketSignal: signal ? { headline: signal.headline, recommendation: signal.recommendation } : null,
     });
 
     // AI javobini server statistikasi bilan birlashtiramiz

@@ -7,6 +7,7 @@ import {
   refreshRoomShopper,
   refreshChannelPrices,
   refreshAllChannels,
+  getPriceSignalsEndpoint,
 } from '../controllers/prices.controller.js';
 
 const router = Router();
@@ -33,6 +34,7 @@ router.use(resolveHotel);
  *       401: { $ref: '#/components/responses/Unauthorized' }
  */
 router.get('/rate-shopper', getRateShopper);
+router.get('/signals', getPriceSignalsEndpoint);
 
 /**
  * @openapi

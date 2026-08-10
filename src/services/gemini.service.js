@@ -89,7 +89,7 @@ Faqat JSON qaytar (${langName} tilida):
  * @param channels [{channel, currentPrice, compPrices:[{name,price}], min, max, median, rank, total}]
  * @returns {summary, channels:[{channel, suggestedPrice, action, reason}]}
  */
-export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, channels, lang = 'uz' }) {
+export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, channels, lang = 'uz', marketSignal = null }) {
   const m = getModel();
   if (!m) return { summary: '', channels: [] };
 
@@ -105,10 +105,11 @@ export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, ch
   const prompt = `Sen hotel revenue manager mutaxassisisan. Quyida mehmonxonaning HAR BIR OTA kanalidagi o'z narxi va raqiblarning AYNAN O'SHA KANALDAGI narxlari berilgan. Har kanal uchun alohida, aniq narx tavsiya qil.
 
 Mehmonxona: ${hotelName}${stars ? ` (${stars}★)` : ''}${rating ? `, reyting ${rating}` : ''}
-
+${marketSignal?.headline ? `\nNARX SIGNALI (nega raqiblar narx o'zgartirdi): ${marketSignal.headline} ${marketSignal.recommendation}\n` : ''}
 ${chText}
 
 Qoidalar:
+- NARX SIGNALINI hisobga ol: agar BOZOR ko'tarilgan bo'lsa (bir nechta raqib birga) — narx ko'tarish o'rinli. Agar FAQAT BITTA raqib ko'targan bo'lsa (shaxsiy holat) — ko'r-ko'rona takrorlama, o'z bo'sh xonalaringni hisobga ol.
 - Har kanal uchun suggestedPrice — butun son (USD). Raqiblar oralig'iga va mehmonxona darajasiga mos bo'lsin, keskin sakrash qilma (bir qadamda maksimal ~40% o'zgarish).
 - action: "raise" (ko'tarish) | "lower" (tushirish) | "keep" (saqlash).
 - reason: 1-2 jumla, ANIQ raqamlar bilan ("raqiblar $104 atrofida, $99 → $103 qiling" uslubida).

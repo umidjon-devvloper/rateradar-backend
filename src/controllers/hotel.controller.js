@@ -2262,12 +2262,30 @@ export async function collectCompetitorRooms(competitor, city) {
     if (sr?.rooms?.length) {
       const roomTypes = sr.rooms.slice(0, 10).map((r) => ({
         name: r.name || 'Room', price: Math.round(r.price || 0), guests: r.guests || 2,
+        roomsLeft: Number.isFinite(r.roomsLeft) ? r.roomsLeft : (Number.isFinite(r.rooms_left) ? r.rooms_left : null),
       })).filter((r) => r.price > 0);
       if (roomTypes.length) {
-        competitor.roomTypes = roomTypes;
+        competitor.roomTypes = roomTypes.map(({ roomsLeft, ...r }) => r); // model roomTypes'da roomsLeft yo'q
         competitor.roomsFetchedAt = new Date();
         await competitor.save().catch(() => {});
-        return roomTypes;
+
+        // OCCUPANCY tarixi — RoomSnapshot yozamiz (eng arzon xona nomi + roomsLeft).
+        try {
+          const RoomSnapshot = (await import('../models/RoomSnapshot.js')).default;
+          const sorted = [...roomTypes].sort((a, b) => a.price - b.price);
+          const cheapest = sorted[0];
+          await RoomSnapshot.create({
+            competitorId: competitor._id,
+            ownerHotelId: competitor.ownerHotelId,
+            checkIn: null,
+            rooms: sorted.map((r) => ({ name: r.name, price: r.price, roomsLeft: r.roomsLeft })),
+            minPrice: cheapest.price,
+            minRoomName: cheapest.name,
+            roomsLeft: cheapest.roomsLeft,
+          }).catch(() => {});
+        } catch { /* tarix ixtiyoriy */ }
+
+        return competitor.roomTypes;
       }
     }
   } catch (e) {

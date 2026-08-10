@@ -13,6 +13,7 @@ const notificationSchema = new mongoose.Schema(
         'price_drop',
         'price_rise',
         'competitor_below',
+        'market_rising',
         'new_review',
         'negative_review',
         'ai_recommendation',

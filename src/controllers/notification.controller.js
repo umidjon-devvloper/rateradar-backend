@@ -205,6 +205,34 @@ export async function checkCompetitorPrices(req, res, next) {
       created++;
     }
 
+    // ── BOZOR SIGNALI — bir nechta raqib birga narx ko'targanda (sezon/talab) ──
+    // Kuniga bir marta (24h dedup): "bozor ko'tarilyapti, siz ham ko'ring".
+    try {
+      const { analyzePriceMovements } = await import('../services/priceSignal.service.js');
+      const mv = await analyzePriceMovements(hotel._id);
+      if (mv.market.rising) {
+        const dup = await Notification.findOne({
+          userId: req.user._id, hotelId: hotel._id, type: 'market_rising',
+          createdAt: { $gte: since24h },
+        });
+        if (!dup) {
+          const mt = {
+            uz: { title: '📈 Bozor ko\'tarilyapti', message: `${mv.market.risers}/${mv.market.total} raqib narxni ~${mv.market.avgRise}% oshirdi (sezon/talab). Siz ham narxni ko'tarishni ko'rib chiqing.` },
+            en: { title: '📈 Market is rising', message: `${mv.market.risers}/${mv.market.total} competitors raised prices ~${mv.market.avgRise}% (season/demand). Consider raising yours.` },
+            ru: { title: '📈 Рынок растёт', message: `${mv.market.risers}/${mv.market.total} конкурентов подняли цены ~${mv.market.avgRise}% (сезон/спрос). Рассмотрите повышение.` },
+          }[lang];
+          const n = await Notification.create({
+            userId: req.user._id, hotelId: hotel._id,
+            type: 'market_rising', severity: 'info',
+            title: mt.title, message: mt.message,
+            payload: { risers: mv.market.risers, total: mv.market.total, avgRise: mv.market.avgRise },
+          });
+          emitToUser(req.user._id, 'notification:new', n.toObject());
+          created++;
+        }
+      }
+    } catch { /* signal ixtiyoriy */ }
+
     res.json({ created });
   } catch (err) {
     next(err);
