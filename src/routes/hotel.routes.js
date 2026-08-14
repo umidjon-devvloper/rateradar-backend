@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import {
   createHotel, getMyHotel, updateMyHotel, listMyHotels, getOccupancy, setOccupancy,
-  getCompetitors, addCompetitor, deleteCompetitor, fetchCompetitorPrice, fetchCompetitorXoteloPrice, fetchCompetitorHasDataPrice, getCompetitorDetail, fetchCompetitorRooms,
+  getCompetitors, addCompetitor, deleteCompetitor, fetchCompetitorPrice, fetchCompetitorXoteloPrice, fetchCompetitorHasDataPrice, getCompetitorDetail, fetchCompetitorRooms, getCompetitorRoomsByDate,
   updateCompetitorOtaUrls, fetchCompetitorChannel,
   enrichMyHotel, getOtaPrices, getOtaChannels, getOtaChannelDetail, setOtaChannelPrice,
   fetchOtaChannel, fetchAllOtaChannels, findBookingUrlEndpoint,
@@ -537,5 +537,34 @@ router.post('/competitors/:id/fetch-channel', fetchCompetitorChannel);
  */
 router.get('/competitors/:id/detail', getCompetitorDetail);
 router.post('/competitors/:id/rooms', fetchCompetitorRooms);
+
+/**
+ * @openapi
+ * /hotels/competitors/{id}/rooms:
+ *   get:
+ *     tags: [Hotels]
+ *     summary: Raqibning aynan shu tun uchun xona turlari va narxlari
+ *     description: >
+ *       Avval keshdan (RoomSnapshot, 20 soat) o'qiydi, yo'q bo'lsagina skreyp
+ *       qiladi. Rate Shopper jadvalida narx katakchasi ochilganda chaqiriladi.
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *       - in: query
+ *         name: date
+ *         required: true
+ *         schema: { type: string, example: '2026-08-15' }
+ *       - in: query
+ *         name: force
+ *         schema: { type: boolean }
+ *     responses:
+ *       200: { description: "{ name, date, rooms:[{name, price, guests, roomsLeft}], fetchedAt, cached }" }
+ *       400: { description: date noto'g'ri }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.get('/competitors/:id/rooms', getCompetitorRoomsByDate);
 
 export default router;

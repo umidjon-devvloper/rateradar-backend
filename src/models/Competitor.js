@@ -39,6 +39,11 @@ const competitorSchema = new mongoose.Schema(
         name: { type: String, default: "" },
         price: { type: Number, default: 0 },
         guests: { type: Number, default: 2 },
+        // "Faqat X xona qoldi" — Booking ba'zan ko'rsatadi. Skreyper buni
+        // ALLAQACHON olardi, lekin bu maydon bo'lmagani uchun saqlashdan
+        // oldin o'chirib tashlanardi. Aslida bu eng qimmatli signal:
+        // foydalanuvchiga raqibning to'lish darajasini ko'rsatadi.
+        roomsLeft: { type: Number, default: null },
       }],
       default: [],
     },

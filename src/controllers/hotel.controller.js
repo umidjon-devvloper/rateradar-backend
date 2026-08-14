@@ -2299,31 +2299,47 @@ export async function getCompetitorDetail(req, res, next) {
  * Sekin (Booking skreyp) — 45s bilan cheklangan, bo'sh qaytsa eski saqlanadi.
  * @returns {Promise<Array>} roomTypes
  */
-export async function collectCompetitorRooms(competitor, city) {
+export async function collectCompetitorRooms(competitor, city, { checkIn = null } = {}) {
   try {
     const { scraperEnabled, scraperRooms } = await import('../services/hotelScraper.service.js');
     if (!scraperEnabled()) return competitor.roomTypes || [];
+
+    // Sana berilsa — AYNAN o'sha tun uchun so'raymiz. Ilgari sana umuman
+    // uzatilmasdi, shuning uchun xona narxlari bitta noma'lum sana uchun
+    // bo'lardi va Rate Shopper jadvalidagi 7 ustunga bog'lanmasdi.
+    const ci = checkIn ? new Date(checkIn) : null;
+    const co = ci ? new Date(ci.getTime() + 86400_000) : null;
+    const dateArgs = ci
+      ? { checkIn: ci.toISOString().slice(0, 10), checkOut: co.toISOString().slice(0, 10) }
+      : {};
+
     const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('rooms timeout')), 45_000));
-    const sr = await Promise.race([scraperRooms(competitor.name, city || ''), timeout]);
+    const sr = await Promise.race([scraperRooms(competitor.name, city || '', dateArgs), timeout]);
     if (sr?.rooms?.length) {
       const roomTypes = sr.rooms.slice(0, 10).map((r) => ({
         name: r.name || 'Room', price: Math.round(r.price || 0), guests: r.guests || 2,
         roomsLeft: Number.isFinite(r.roomsLeft) ? r.roomsLeft : (Number.isFinite(r.rooms_left) ? r.rooms_left : null),
       })).filter((r) => r.price > 0);
-      if (roomTypes.length) {
-        competitor.roomTypes = roomTypes.map(({ roomsLeft, ...r }) => r); // model roomTypes'da roomsLeft yo'q
-        competitor.roomsFetchedAt = new Date();
-        await competitor.save().catch(() => {});
 
-        // OCCUPANCY tarixi — RoomSnapshot yozamiz (eng arzon xona nomi + roomsLeft).
+      if (roomTypes.length) {
+        const sorted = [...roomTypes].sort((a, b) => a.price - b.price);
+
+        // `Competitor.roomTypes` — "eng so'nggi ko'rinish" (sanasiz so'rov yoki
+        // eng yaqin tun). Sana bo'yicha to'liq tarix RoomSnapshot'da.
+        if (!ci) {
+          competitor.roomTypes = roomTypes;
+          competitor.roomsFetchedAt = new Date();
+          await competitor.save().catch(() => {});
+        }
+
+        // Sana bo'yicha kesh + occupancy tarixi.
         try {
           const RoomSnapshot = (await import('../models/RoomSnapshot.js')).default;
-          const sorted = [...roomTypes].sort((a, b) => a.price - b.price);
           const cheapest = sorted[0];
           await RoomSnapshot.create({
             competitorId: competitor._id,
             ownerHotelId: competitor.ownerHotelId,
-            checkIn: null,
+            checkIn: ci,
             rooms: sorted.map((r) => ({ name: r.name, price: r.price, roomsLeft: r.roomsLeft })),
             minPrice: cheapest.price,
             minRoomName: cheapest.name,
@@ -2331,13 +2347,77 @@ export async function collectCompetitorRooms(competitor, city) {
           }).catch(() => {});
         } catch { /* tarix ixtiyoriy */ }
 
-        return competitor.roomTypes;
+        return roomTypes;
       }
     }
   } catch (e) {
     console.warn(`[comp-rooms] ${competitor?.name}: ${e.message}`);
   }
   return competitor.roomTypes || [];
+}
+
+// Sana bo'yicha xona keshining yaroqlilik muddati. Narx kun davomida kam
+// o'zgaradi, skreyp esa kredit turadi — 20 soat oqilona muvozanat.
+const ROOMS_CACHE_MS = 20 * 3600_000;
+
+/**
+ * GET /hotels/competitors/:id/rooms?date=YYYY-MM-DD[&force=true]
+ *
+ * Raqibning AYNAN SHU TUN uchun xona turlari, narxlari va "necha xona qoldi".
+ * Avval keshdan (RoomSnapshot) o'qiydi; yo'q yoki eskirgan bo'lsagina skreyp
+ * qiladi. Shuning uchun bir katakchani qayta-qayta ochish kredit sarflamaydi.
+ */
+export async function getCompetitorRoomsByDate(req, res, next) {
+  try {
+    const myHotel = req.hotel;
+    if (!myHotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+    const competitor = await Competitor.findOne({
+      _id: req.params.id, ownerHotelId: myHotel._id, isActive: true,
+    });
+    if (!competitor) return res.status(404).json({ error: 'Raqib topilmadi' });
+
+    const raw = String(req.query.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return res.status(400).json({ error: 'date=YYYY-MM-DD talab etiladi' });
+    }
+    const checkIn = new Date(`${raw}T00:00:00.000Z`);
+    if (Number.isNaN(checkIn.getTime())) {
+      return res.status(400).json({ error: 'date noto\'g\'ri' });
+    }
+    const force = req.query.force === 'true';
+
+    const RoomSnapshot = (await import('../models/RoomSnapshot.js')).default;
+    if (!force) {
+      const cached = await RoomSnapshot.findOne({
+        competitorId: competitor._id,
+        checkIn,
+        snapshotAt: { $gte: new Date(Date.now() - ROOMS_CACHE_MS) },
+      }).sort({ snapshotAt: -1 }).lean();
+
+      if (cached?.rooms?.length) {
+        return res.json({
+          competitorId: competitor._id,
+          name: competitor.name,
+          date: raw,
+          rooms: cached.rooms,
+          fetchedAt: cached.snapshotAt,
+          cached: true,
+        });
+      }
+    }
+
+    const rooms = await collectCompetitorRooms(competitor, myHotel.city, { checkIn });
+    res.json({
+      competitorId: competitor._id,
+      name: competitor.name,
+      date: raw,
+      rooms: (rooms || []).map((r) => (r.toObject ? r.toObject() : r)),
+      fetchedAt: new Date(),
+      cached: false,
+    });
+  } catch (err) {
+    next(err);
+  }
 }
 
 /**
