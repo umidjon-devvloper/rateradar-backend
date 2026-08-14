@@ -10,13 +10,30 @@ import {
 } from "../services/openai.service.js";
 import { chatSupport, assistantChat, getOtaChannelAdvice, isGeminiEnabled } from "../services/gemini.service.js";
 import PriceSnapshot from "../models/PriceSnapshot.js";
+import { applyAdviceRules, MIN_COMPETITOR_POINTS } from "../services/priceAdvice.rules.js";
+import { currentOccupancy } from "../services/occupancy.service.js";
+import { detectParityBreaches } from "../services/parity.service.js";
+import { channelDisplay, isControllable } from "../config/channels.js";
 import { planAllows } from "../config/plans.js";
 
 export function getAIStatus(req, res) {
   // allowed — foydalanuvchi tarifida AI bormi (Starter'da yo'q). Frontend
   // shuni o'qib AI tugmalarini yashiradi/qulflaydi.
   const allowed = req.user?.role === 'admin' || planAllows(req.user?.plan, 'ai');
-  res.json({ enabled: isAIEnabled(), model: "gpt-4o-mini", allowed });
+
+  // Ilgari bu yerda `model: "gpt-4o-mini"` qattiq yozilgan edi — landing esa
+  // "Gemini AI" deb reklama qilardi. Ikkalasi ham to'liq to'g'ri emas: mahsulot
+  // IKKALA provayderni ishlatadi (narx tavsiyasi va sharh tahlili — OpenAI;
+  // kanal maslahati, chat va yordamchi — Gemini). Endpoint ochiq va tekshirilishi
+  // oson, shuning uchun u haqiqatni aytsin.
+  res.json({
+    enabled: isAIEnabled() || isGeminiEnabled(),
+    allowed,
+    providers: {
+      openai: isAIEnabled(),   // narx tavsiyalari, sharh tahlili
+      gemini: isGeminiEnabled(), // kanal maslahati, chat, yordamchi
+    },
+  });
 }
 
 export async function aiPriceRecommendations(req, res, next) {
@@ -254,9 +271,13 @@ export async function aiOtaAdvice(req, res, next) {
     const reqLang2 = req.query.lang || 'uz';
     const isFresh = hotel.aiOtaAdviceAt &&
       Date.now() - new Date(hotel.aiOtaAdviceAt).getTime() < OTA_ADVICE_FRESH_MS;
-    // Kesh tili sayt tiliga mos bo'lsagina ishlatiladi
+    // Kesh tili sayt tiliga mos bo'lsagina ishlatiladi.
+    // Occupancy ham kesh kaliti: foydalanuvchi to'lish darajasini kiritsa yoki
+    // hisoboti eskirsa, eski tavsiya (masalan "Ko'tarish") yaroqsiz bo'ladi.
+    const occNow = currentOccupancy(hotel)?.band || null;
     if (!refresh && isFresh && hotel.aiOtaAdvice?.channels?.length &&
-        (hotel.aiOtaAdvice.lang || 'uz') === reqLang2) {
+        (hotel.aiOtaAdvice.lang || 'uz') === reqLang2 &&
+        (hotel.aiOtaAdvice.coverage?.occupancyBand ?? null) === occNow) {
       return res.json({ ...hotel.aiOtaAdvice, asOf: hotel.aiOtaAdviceAt, cached: true });
     }
 
@@ -285,7 +306,9 @@ export async function aiOtaAdvice(req, res, next) {
     for (const s of snaps) {
       const key = otaKey(s._id.ota);
       if (!key) continue;
-      const display = OTA_DISPLAY[key] || s._id.ota;
+      // Ko'rsatiladigan nom endi yagona registrdan (config/channels.js) —
+      // kanal turi ham o'sha yerdan olinadi, ikkalasi bir joyda tursin.
+      const display = channelDisplay(s._id.ota);
       if (!byChannel.has(key)) byChannel.set(key, { channel: display, currentPrice: 0, compPrices: [] });
       const ch = byChannel.get(key);
       if (s._id.targetType === 'own') {
@@ -337,34 +360,71 @@ export async function aiOtaAdvice(req, res, next) {
       signal = await getPriceSignals(hotel._id);
     } catch { /* signal ixtiyoriy */ }
 
-    const ai = await getOtaChannelAdvice({
-      hotelName: hotel.name,
-      stars: hotel.stars || 0,
-      rating: hotel.rating || 0,
-      channels,
-      lang,
-      marketSignal: signal ? { headline: signal.headline, recommendation: signal.recommendation } : null,
-    });
+    // AI'ga FAQAT tavsiya berish mumkin bo'lgan kanallarni yuboramiz:
+    //   • kanalda narx belgilay olasiz (OTA yoki o'z saytingiz)
+    //   • o'z narxingiz ma'lum
+    //   • yetarli raqib nuqtasi bor
+    // Qolganlari baribir qoida qatlamida "kuzatiladi" / "ma'lumot yo'q" bo'lib
+    // chiqadi — ular uchun token sarflash ham, javob kutish ham keraksiz.
+    // Amalda bu 12+ kanaldan ~3-4 tasini qoldiradi.
+    const adviceCandidates = channels.filter(
+      (c) => isControllable(c.channel)
+        && c.currentPrice > 0
+        && (c.total - 1) >= MIN_COMPETITOR_POINTS,
+    );
+
+    const ai = adviceCandidates.length
+      ? await getOtaChannelAdvice({
+        hotelName: hotel.name,
+        stars: hotel.stars || 0,
+        rating: hotel.rating || 0,
+        channels: adviceCandidates,
+        lang,
+        marketSignal: signal ? { headline: signal.headline, recommendation: signal.recommendation } : null,
+      })
+      : { summary: '', channels: [] };
 
     // AI javobini server statistikasi bilan birlashtiramiz
     const aiByKey = new Map((ai.channels || []).map((c) => [otaKey(c.channel), c]));
-    const merged = channels.map((c) => {
+    const raw = channels.map((c) => {
       const a = aiByKey.get(otaKey(c.channel)) || {};
-      const suggested = Number(a.suggestedPrice) > 0 ? Math.round(a.suggestedPrice) : 0;
       return {
         channel: c.channel,
         currentPrice: c.currentPrice,
-        suggestedPrice: suggested,
-        delta: c.currentPrice > 0 && suggested ? suggested - c.currentPrice : 0,
-        action: ['raise', 'lower', 'keep'].includes(a.action)
-          ? a.action
-          : suggested && c.currentPrice ? (suggested > c.currentPrice ? 'raise' : suggested < c.currentPrice ? 'lower' : 'keep') : 'keep',
+        suggestedPrice: Number(a.suggestedPrice) > 0 ? Math.round(a.suggestedPrice) : 0,
+        action: a.action || '',
         reason: a.reason || '',
         stats: { min: c.min, max: c.max, median: c.median, rank: c.rank, total: c.total },
       };
-    }).filter((c) => c.suggestedPrice > 0 || c.currentPrice > 0);
+    });
 
-    const result = { summary: ai.summary || '', channels: merged, engine: 'gemini', lang };
+    // ── QOIDA QATLAMI ────────────────────────────────────────────────
+    // AI taklifi to'g'ridan-to'g'ri foydalanuvchiga BORMAYDI. Avval qattiq
+    // shartlardan o'tadi: narx noma'lum bo'lsa "ko'tarish" deyilmaydi, 3 tadan
+    // kam raqib nuqtasida tavsiya berilmaydi, va bozor signali "bu shaxsiy
+    // holat" desa — ko'tarish "kutish"ga aylanadi.
+    // To'lish darajasi — tavsiyaning ikkinchi yarmi. Yo'q bo'lsa `null` va
+    // qoida qatlami buni halol ko'rsatadi (ishonch hech qachon "yuqori" emas).
+    const { channels: merged, coverage } = applyAdviceRules(raw, {
+      signal,
+      occupancyBand: occNow,
+      lang,
+    });
+
+    // ── RATE PARITY ──────────────────────────────────────────────────
+    // Wholesaler kanallardagi past narx tavsiya emas, OGOHLANTIRISH: sizning
+    // inventaringiz kimdir tomonidan arzonroq sotilmoqda. Booking shartnomasi
+    // buzilishi mumkin, mehmonxona buni odatda bilmaydi.
+    const parity = detectParityBreaches(raw, lang);
+
+    const result = {
+      summary: ai.summary || '',
+      channels: merged.filter((c) => c.suggestedPrice > 0 || c.currentPrice > 0),
+      coverage,
+      parity,
+      engine: 'gemini',
+      lang,
+    };
     const now = new Date();
     await Hotel.updateOne(
       { _id: hotel._id },

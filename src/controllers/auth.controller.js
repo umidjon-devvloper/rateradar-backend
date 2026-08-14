@@ -82,12 +82,12 @@ export async function login(req, res, next) {
 export async function me(req, res) {
   // Tarif cheklovlarini ham qaytaramiz — frontend AI/kanal/raqib gating'ni
   // shundan o'qiydi (yagona manba). Admin barcha cheklovdan ozod.
-  const { planLimits } = await import("../config/plans.js");
+  const { planLimits, ADMIN_LIMITS } = await import("../config/plans.js");
   const isAdmin = req.user?.role === "admin";
-  const base = planLimits(req.user?.plan);
-  const limits = isAdmin
-    ? { maxCompetitors: 0, maxHotels: 0, channels: null, ai: true, reviewsReply: true, reviewsAnalytics: true, maxTv: 0, hotelService: true }
-    : base;
+  // Admin cheklovlari plans.js dan keladi — bu yerda nusxa saqlanmaydi, aks
+  // holda ikkalasi vaqt o'tib bir-biridan uzoqlashadi (ilgari shunday edi:
+  // bu yerda `0 = cheksiz` yozilgan, plans.js esa boshqa ma'noda ishlatardi).
+  const limits = isAdmin ? ADMIN_LIMITS : planLimits(req.user?.plan);
   res.json({ user: req.user, limits });
 }
 

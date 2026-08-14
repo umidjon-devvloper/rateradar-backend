@@ -8,6 +8,7 @@ import { startCompetitorMonitor } from './services/competitorMonitor.service.js'
 import { startWeeklyRefresh } from './services/weeklyRefresh.service.js';
 import { startXoteloMonitor } from './services/xoteloMonitor.service.js';
 import { startSubscriptionRenewal } from './services/subscriptionRenewal.service.js';
+import { startRateHistoryRollup, rollupRecent } from './services/rateHistory.service.js';
 import { initSocket } from './services/socket.service.js';
 
 const require = createRequire(import.meta.url);
@@ -40,6 +41,14 @@ async function start() {
     startWeeklyRefresh();
     startXoteloMonitor(); // Har kuni 00:00 — ertaga+indin Xotelo narxlari
     startSubscriptionRenewal(); // Har kuni 09:00 — saqlangan karta bilan avto-to'lov
+    // Har kuni 04:00 — xom narx snapshotlarini abadiy kunlik tarixga (DailyRate)
+    // yig'ish. Bu STLY va booking-curve tahlilining yagona manbai.
+    startRateHistoryRollup();
+    // Server ishga tushganda ham bir marta — pm2 restart yoki uzilish bo'lsa
+    // 04:00 cron'i o'tkazib yuborilgan bo'lishi mumkin (rollup idempotent).
+    rollupRecent().then((r) => {
+      if (r.written) console.log(`[boot] Narx tarixi rollup: ${r.written} yozuv`);
+    }).catch((e) => console.warn('[boot] rollup xato:', e.message));
   });
 }
 

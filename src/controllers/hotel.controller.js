@@ -136,6 +136,52 @@ export async function getCollectStatus(req, res, next) {
   }
 }
 
+/**
+ * GET /hotels/me/occupancy — hozirgi to'lish darajasi + so'rash kerakmi.
+ */
+export async function getOccupancy(req, res, next) {
+  try {
+    const hotel = req.hotel || await Hotel.findOne({ userId: req.user._id });
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+
+    const { currentOccupancy, hasReportedThisWeek, weekStartOf } =
+      await import('../services/occupancy.service.js');
+    const current = currentOccupancy(hotel);
+    res.json({
+      current,                              // {band, weekStart, ageDays} yoki null
+      shouldAsk: !hasReportedThisWeek(hotel), // UI shu haftada so'ramagan bo'lsa so'raydi
+      weekStart: weekStartOf(),
+    });
+  } catch (err) { next(err); }
+}
+
+/**
+ * PUT /hotels/me/occupancy — haftalik to'lish darajasini yozish.
+ * Body: { band: 'low' | 'mid' | 'high' }
+ *
+ * Bu narx tavsiyasining ikkinchi yarmi: usiz tizim raqiblar medianasini
+ * qaytaradi, u bilan esa haqiqiy revenue qaroriga aylanadi.
+ */
+export async function setOccupancy(req, res, next) {
+  try {
+    const hotel = req.hotel || await Hotel.findOne({ userId: req.user._id });
+    if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
+
+    const { upsertReport, currentOccupancy } = await import('../services/occupancy.service.js');
+    upsertReport(hotel, String(req.body?.band || ''));
+
+    // Keshlangan AI tavsiyasi endi eskirgan — to'lish darajasi tavsiyani
+    // o'zgartiradi (masalan "Ko'tarish" → "Kutish"). Keshni bekor qilamiz.
+    hotel.aiOtaAdviceAt = null;
+    await hotel.save();
+
+    res.json({ ok: true, current: currentOccupancy(hotel) });
+  } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
+    next(err);
+  }
+}
+
 export async function getMyHotel(req, res, next) {
   try {
     // req.hotel resolveHotel middleware tomonidan o'rnatiladi (X-Hotel-Id

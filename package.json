@@ -8,7 +8,9 @@
     "start": "node --max-old-space-size=4096 src/server.js",
     "predev": "kill-port 5000",
     "dev": "nodemon src/server.js",
-    "seed": "node src/utils/seed.js"
+    "seed": "node src/utils/seed.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "migrate:rate-history": "node scripts/rate-history-migrate.js"
   },
   "nodemonConfig": {
     "nodeArgs": [

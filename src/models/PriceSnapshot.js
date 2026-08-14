@@ -22,6 +22,20 @@ const priceSnapshotSchema = new mongoose.Schema(
 priceSnapshotSchema.index({ ownerHotelId: 1, snapshotAt: -1 });
 priceSnapshotSchema.index({ targetId: 1, ota: 1, snapshotAt: -1 });
 priceSnapshotSchema.index({ ownerHotelId: 1, ota: 1, snapshotAt: -1 });
-priceSnapshotSchema.index({ snapshotAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 90 });
+
+// ⚠️ TTL INDEKSI ATAYLAB OLIB TASHLANDI (2026-08-12).
+//
+// Ilgari shu yerda `expireAfterSeconds: 60*60*24*90` turardi — narx tarixi
+// 90 kunda o'chib ketardi. Lekin STLY (Same Time Last Year) tahlili 358-366
+// kun oldingi ma'lumotni so'raydi → natija HAR DOIM bo'sh bo'lardi, server
+// necha yil ishlashidan qat'i nazar.
+//
+// Bu jadval endi XOM (raw) qatlam: har bir scrape natijasi to'liq saqlanadi.
+// Undan kunlik agregat `DailyRate` ga yig'iladi (rateHistory.service.js) —
+// tarixiy tahlil AYNAN o'sha jadvaldan o'qiydi.
+//
+// Xom qatlam kattalashsa, TTL'ni QAYTA QO'YISH mumkin — LEKIN faqat kunlik
+// rollup ishlayotganiga ishonch hosil qilgandan keyin va TTL rollup
+// oynasidan (3 kun) sezilarli uzun bo'lsin (masalan 180 kun).
 
 export default mongoose.model('PriceSnapshot', priceSnapshotSchema);

@@ -13,14 +13,33 @@
  * `free` — ichki holat (ro'yxatdan o'tgan, hali to'lamagan).
  */
 
-// Har tarifning funksiya cheklovlari. 0 = cheksiz. channels: null = barcha OTA;
+// ⚠️ CHEKSIZLIK BELGISI (2026-08-12 da o'zgartirildi)
+//
+// Ilgari `0` IKKI ma'noda ishlatilar edi: "cheksiz" (business) va "nol"
+// (free uchun niyat qilingan). `assertLimit` dagi `if (limit > 0 && ...)`
+// tekshiruvi tufayli FREE tarif AMALDA CHEKSIZ raqib berardi — ya'ni
+// to'lamagan foydalanuvchi Pro'dan (10 ta) ham ko'p raqib qo'sha olardi,
+// va har bir raqib scraping xarajati demakdir.
+//
+// Endi cheksizlik = `UNLIMITED` (null). Son esa har doim ANIQ son.
+// `0` yozsangiz u haqiqiy nolni anglatadi.
+export const UNLIMITED = null;
+
+// Har tarifning funksiya cheklovlari. channels: null = barcha OTA;
 // massiv = faqat shu kanallar KO'RSATILADI (baza baribir hammasini saqlaydi).
 // reviewsAnalytics: sharhlar analitika dashboardi (Starter'da qulf).
 const LIMITS = {
-  free:     { maxCompetitors: 0,  maxHotels: 1, channels: ['booking'],            ai: false, reviewsReply: false, reviewsAnalytics: false, maxTv: 0, hotelService: false },
-  starter:  { maxCompetitors: 3,  maxHotels: 1, channels: ['booking', 'expedia'], ai: false, reviewsReply: false, reviewsAnalytics: false, maxTv: 1, hotelService: false },
-  pro:      { maxCompetitors: 10, maxHotels: 1, channels: null,                   ai: true,  reviewsReply: true,  reviewsAnalytics: true,  maxTv: 5, hotelService: true },
-  business: { maxCompetitors: 0,  maxHotels: 5, channels: null,                   ai: true,  reviewsReply: true,  reviewsAnalytics: true,  maxTv: 0, hotelService: true },
+  free:     { maxCompetitors: 1,         maxHotels: 1, channels: ['booking'],            ai: false, reviewsReply: false, reviewsAnalytics: false, maxTv: 0,         hotelService: false },
+  starter:  { maxCompetitors: 3,         maxHotels: 1, channels: ['booking', 'expedia'], ai: false, reviewsReply: false, reviewsAnalytics: false, maxTv: 1,         hotelService: false },
+  pro:      { maxCompetitors: 10,        maxHotels: 1, channels: null,                   ai: true,  reviewsReply: true,  reviewsAnalytics: true,  maxTv: 5,         hotelService: true },
+  business: { maxCompetitors: UNLIMITED, maxHotels: 5, channels: null,                   ai: true,  reviewsReply: true,  reviewsAnalytics: true,  maxTv: UNLIMITED, hotelService: true },
+};
+
+// Admin barcha sonli cheklovlardan ozod (yagona manba — auth.controller ham
+// shuni o'qiydi, o'z nusxasini yasamasin).
+export const ADMIN_LIMITS = {
+  maxCompetitors: UNLIMITED, maxHotels: UNLIMITED, maxTv: UNLIMITED, channels: null,
+  ai: true, reviewsReply: true, reviewsAnalytics: true, hotelService: true,
 };
 
 export const PLANS = {

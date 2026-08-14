@@ -79,6 +79,28 @@ const hotelSchema = new mongoose.Schema(
     // { summary, channels: [{channel, currentPrice, suggestedPrice, ...}] }
     aiOtaAdvice: { type: Object, default: null },
     aiOtaAdviceAt: { type: Date, default: null },
+
+    // ── TO'LISH DARAJASI (occupancy) ───────────────────────────────────
+    // Mahsulotning "narx kuzatuvchi"dan RMS'ga o'tishidagi yagona yetishmagan
+    // kirish. Raqiblar medianasi occupancy'siz tavsiya emas, shunchaki
+    // kuzatuv: mehmonxona yarim bo'sh bo'lsa, raqiblar qimmat bo'lgani narxni
+    // ko'tarish uchun asos bo'lolmaydi.
+    //
+    // PMS integratsiyasi SHART EMAS — bitta savol yetarli:
+    //   "Kelasi 7 kun to'lish darajangiz?" → low (<40%) | mid (40-70%) | high (>70%)
+    //
+    // Tarix massiv sifatida saqlanadi: keyinchalik "o'tgan yil shu haftada
+    // to'lish qanday edi" savoliga javob beradi (DailyRate bilan birga).
+    occupancyReports: {
+      type: [
+        {
+          weekStart: { type: Date, required: true },   // UTC dushanba
+          band: { type: String, enum: ['low', 'mid', 'high'], required: true },
+          reportedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     roomTypes: {
       type: [
         {

@@ -19,32 +19,33 @@ function ratingToSentiment(rating) {
   return 'neutral';
 }
 
-// Sharh oynasi: oxirgi 14 kun (2 hafta). Eski sharhlar bazadan olib
-// tashlanadi, kelgan natija ham shu oynaga filterlanadi. Foydalanuvchi
-// "yangi" sharhlarni ko'rishi kerak — eski 6 oylik sharhlar bazani shishiradi.
-export const REVIEW_WINDOW_DAYS = 14;
+// Sharh SAQLASH oynasi: 2 yil (730 kun). Bu — retention (korpus) oynasi, "yangi"
+// belgisi emas. Ilgari 14 kun edi — kichik mehmonxonalarda eski (lekin qimmatli)
+// sharhlar o'chib ketardi ("Jami sharhlar: 1" muammosi). Sanasi noaniq sharhlar
+// ham SAQLANADI (o'chirilmaydi). "Yangi" sharh — seenByUser bilan belgilanadi.
+export const REVIEW_WINDOW_DAYS = 730;
 
 function windowCutoff() {
   return new Date(Date.now() - REVIEW_WINDOW_DAYS * 86400_000);
 }
 
 function isWithinWindow(date) {
-  if (!date) return false;
+  // Sanasi yo'q/noaniq sharh ham SAQLANADI (qimmatli, tashlab yubormaymiz).
+  if (!date) return true;
   const d = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(d.getTime())) return false;
+  if (Number.isNaN(d.getTime())) return true;
   return d.getTime() >= windowCutoff().getTime();
 }
 
 /**
- * Berilgan hotel uchun oynadan tashqaridagi sharhlarni o'chiradi.
- * `platform` berilsa — faqat shu manba uchun, aks holda — barchasi.
- * `publishedAt: null` bo'lganlar ham eski hisoblanadi va o'chiriladi.
+ * Berilgan hotel uchun retention oynasidan (2 yil) TASHQARIDAGI sharhlarni
+ * o'chiradi. Sanasi noaniq (publishedAt:null) sharhlar SAQLANADI — o'chirilmaydi.
  */
 export async function purgeOldReviews(hotelId, platform = null) {
   const cutoff = windowCutoff();
   const filter = {
     ownerHotelId: hotelId,
-    $or: [{ publishedAt: { $lt: cutoff } }, { publishedAt: null }],
+    publishedAt: { $ne: null, $lt: cutoff }, // faqat aniq-eski; null saqlanadi
   };
   if (platform) filter.platform = platform;
   const r = await Review.deleteMany(filter);

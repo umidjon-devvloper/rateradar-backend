@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import {
-  createHotel, getMyHotel, updateMyHotel, listMyHotels,
+  createHotel, getMyHotel, updateMyHotel, listMyHotels, getOccupancy, setOccupancy,
   getCompetitors, addCompetitor, deleteCompetitor, fetchCompetitorPrice, fetchCompetitorXoteloPrice, fetchCompetitorHasDataPrice, getCompetitorDetail, fetchCompetitorRooms,
   updateCompetitorOtaUrls, fetchCompetitorChannel,
   enrichMyHotel, getOtaPrices, getOtaChannels, getOtaChannelDetail, setOtaChannelPrice,
@@ -88,6 +88,36 @@ router.post('/', createHotel);
  */
 router.get('/me', getMyHotel);
 router.put('/me', updateMyHotel);
+
+/**
+ * @openapi
+ * /hotels/me/occupancy:
+ *   get:
+ *     tags: [Hotels]
+ *     summary: Haftalik to'lish darajasi (occupancy) — hozirgi holat
+ *     parameters:
+ *       - $ref: '#/components/parameters/HotelIdHeader'
+ *     responses:
+ *       200: { description: "{ current: {band, weekStart, ageDays}|null, shouldAsk, weekStart }" }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ *   put:
+ *     tags: [Hotels]
+ *     summary: Haftalik to'lish darajasini yozish (narx tavsiyasiga ta'sir qiladi)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               band: { type: string, enum: [low, mid, high] }
+ *     responses:
+ *       200: { description: "{ ok, current }" }
+ *       400: { description: band noto'g'ri }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+router.get('/me/occupancy', getOccupancy);
+router.put('/me/occupancy', setOccupancy);
 
 /**
  * @openapi

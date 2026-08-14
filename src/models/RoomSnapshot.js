@@ -15,7 +15,10 @@ const roomSnapshotSchema = new mongoose.Schema(
     competitorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Competitor', required: true, index: true },
     ownerHotelId: { type: mongoose.Schema.Types.ObjectId, ref: 'Hotel', required: true, index: true },
     checkIn: { type: Date, default: null },
-    snapshotAt: { type: Date, default: Date.now, index: true },
+    // `index: true` ATAYLAB yo'q — indeks quyida TTL bilan birga e'lon qilinadi.
+    // Ikkalasi birga bo'lsa mongoose "duplicate index" ogohlantiradi va qaysi
+    // variant bazaga tushishi noaniq bo'ladi (TTL'siz yoki TTL bilan).
+    snapshotAt: { type: Date, default: Date.now },
     rooms: {
       type: [{ name: String, price: Number, roomsLeft: { type: Number, default: null } }],
       default: [],
@@ -28,7 +31,9 @@ const roomSnapshotSchema = new mongoose.Schema(
 );
 
 roomSnapshotSchema.index({ competitorId: 1, snapshotAt: -1 });
-// 120 kun saqlaymiz (tarix uchun yetarli, keyin o'chadi).
-roomSnapshotSchema.index({ snapshotAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 120 });
+// 120 kun → 400 kun (2026-08-12). Sabab: 120 kun bilan "o'tgan yil shu davrda
+// xona tarkibi qanday edi" savoliga javob bera olmaymiz — occupancy signalining
+// mavsumiy bazasi yo'qoladi. 400 kun = 1 yil + zaxira.
+roomSnapshotSchema.index({ snapshotAt: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 400 });
 
 export default mongoose.model('RoomSnapshot', roomSnapshotSchema);

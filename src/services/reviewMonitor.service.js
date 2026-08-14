@@ -22,9 +22,10 @@ function ratingToSentiment(rating) {
 }
 
 function isWithinWindow(date) {
-  if (!date) return false;
+  // Sanasi yo'q/noaniq sharh ham SAQLANADI (qimmatli — tashlab yubormaymiz).
+  if (!date) return true;
   const d = date instanceof Date ? date : new Date(date);
-  if (Number.isNaN(d.getTime())) return false;
+  if (Number.isNaN(d.getTime())) return true;
   const cutoff = Date.now() - REVIEW_WINDOW_DAYS * 86400_000;
   return d.getTime() >= cutoff;
 }
@@ -155,6 +156,33 @@ async function fetchApifyForHotel(hotel) {
   return { added: adds.reduce((a, b) => a + b, 0) };
 }
 
+// Scrape.do — Booking.com "featured" sharhlari (Apify kalitisiz, 1 kredit).
+// Apify o'chiq/topmagan bo'lsa ham real Booking sharhlarini keltiradi.
+async function fetchScrapedoBookingForHotel(hotel) {
+  try {
+    const { hasScrapeDo, getBookingReviews } = await import('./scrapedo.service.js');
+    if (!hasScrapeDo()) return { added: 0 };
+    const bookingUrl = flatUrl(hotel.otaUrls, 'Booking.com', 'Booking');
+    if (!bookingUrl) return { added: 0 };
+    const items = await getBookingReviews(bookingUrl).catch(() => []);
+    if (!items.length) return { added: 0 };
+    const mapped = items.map((r) => ({
+      platform: 'Booking.com',
+      externalId: r.externalId,
+      author: r.author || 'Anonymous',
+      rating: r.rating || 0,
+      text: r.text || r.title || '',
+      publishedAt: r.date || null, // sanasi null bo'lsa ham saqlanadi
+      sentiment: ratingToSentiment(r.rating || 0),
+    })).filter((r) => r.text);
+    const added = await saveReviewsForHotel(hotel._id, mapped);
+    return { added };
+  } catch (e) {
+    console.warn(`[reviews] Scrape.do Booking "${hotel.name}":`, e.message);
+    return { added: 0 };
+  }
+}
+
 // TripAdvisor (rasmiy Content API) — reyting/ranking keshi + 5 sharh
 async function fetchTripAdvisorForHotel(hotel) {
   if (!hasTripAdvisorContent()) return { added: 0 };
@@ -204,13 +232,14 @@ async function fetchYandexForHotel(hotel) {
 // Bitta hotel uchun barcha kanaldan sharh yig'adi (Google, Apify OTA'lar,
 // Yandex, TripAdvisor). Cron ham, onboarding orkestratori ham shuni chaqiradi.
 export async function collectReviewsForHotel(hotel) {
-  const [g, a, y, ta] = await Promise.all([
+  const [g, a, sd, y, ta] = await Promise.all([
     fetchGoogleForHotel(hotel).catch((err) => { console.warn(`[reviews] Google "${hotel.name}":`, err.message); return 0; }),
     fetchApifyForHotel(hotel).catch((err) => { console.warn(`[reviews] Apify "${hotel.name}":`, err.message); return { added: 0 }; }),
+    fetchScrapedoBookingForHotel(hotel), // o'zi try/catch qiladi
     fetchYandexForHotel(hotel).catch((err) => { console.warn(`[reviews] Yandex "${hotel.name}":`, err.message); return { added: 0 }; }),
     fetchTripAdvisorForHotel(hotel).catch((err) => { console.warn(`[reviews] TripAdvisor "${hotel.name}":`, err.message); return { added: 0 }; }),
   ]);
-  return { google: g, apify: a.added || 0, yandex: y.added || 0, tripadvisor: ta.added || 0 };
+  return { google: g, apify: a.added || 0, scrapedoBooking: sd.added || 0, yandex: y.added || 0, tripadvisor: ta.added || 0 };
 }
 
 async function runReviewMonitor() {
