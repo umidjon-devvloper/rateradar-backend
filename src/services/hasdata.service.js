@@ -167,6 +167,84 @@ async function placeBookingPrice({ url, checkIn, checkOut }) {
 }
 
 /**
+ * XONA TURLARI — Booking Place API'dan TO'LIQ ro'yxat.
+ *
+ * `placeBookingPrice` xuddi shu javobni oladi, lekin `rooms[].variants[]` ni
+ * aylanib chiqib faqat ENG ARZON narxni qaytaradi — qolgan hamma narsa
+ * tashlanardi. Aslida o'sha javobda har bir xona turi, sig'imi va "faqat X
+ * qoldi" ma'lumoti bor.
+ *
+ * Nima uchun bu skreyperdan yaxshiroq: HasData strukturaviy JSON qaytaradi,
+ * HTML parsing yo'q, 522/timeout yo'q. Bitta so'rov 10 kredit.
+ *
+ * @returns {Promise<{rooms:Array<{name,price,guests,roomsLeft}>, currency, url}|null>}
+ */
+export async function getBookingRoomsHasData({ url, checkIn, checkOut }) {
+  if (!hasHasData() || !url) return null;
+
+  const dates = checkIn && checkOut ? { checkIn, checkOut } : defaultDates();
+  let data;
+  try {
+    data = await hdGet("place", {
+      url,
+      checkInDate: dates.checkIn,
+      checkOutDate: dates.checkOut,
+      rooms: 1,
+      adults: 2,
+      children: 0,
+      currency: "usd",
+    });
+    recordApiUsage("hasdata", true, null, "booking_rooms");
+  } catch (err) {
+    recordApiUsage("hasdata", false, err.message, "booking_rooms");
+    throw err;
+  }
+
+  // Bitta xona turi bir necha "variant" bilan keladi (nonushta bilan/siz,
+  // qaytariladigan/qaytarilmaydigan...). Foydalanuvchiga xona turi kerak,
+  // shuning uchun har turdan ENG ARZON variantni olamiz.
+  const rooms = [];
+  for (const room of data?.rooms || []) {
+    let best = null;
+    for (const v of room?.variants || []) {
+      const price = v?.prices?.currentPriceParsed;
+      if (!(price > 0)) continue;
+      if (!best || price < best.price) {
+        best = {
+          price: Math.round(price),
+          // Sig'im va "qoldi" turli javoblarda turli nomda keladi.
+          guests: Number(v?.maxOccupancy ?? v?.guests ?? room?.maxOccupancy ?? 2) || 2,
+          roomsLeft: firstFinite(v?.roomsLeft, v?.availableRooms, room?.roomsLeft),
+        };
+      }
+    }
+    if (!best) continue;
+    rooms.push({
+      name: String(room?.name || room?.title || "Room").trim() || "Room",
+      price: best.price,
+      guests: best.guests,
+      roomsLeft: best.roomsLeft,
+    });
+  }
+
+  if (!rooms.length) return null;
+  rooms.sort((a, b) => a.price - b.price);
+  return {
+    rooms: rooms.slice(0, 12),
+    currency: data?.bookingDetails?.currency || "USD",
+    url,
+  };
+}
+
+function firstFinite(...vals) {
+  for (const v of vals) {
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
+/**
  * Booking.com narxini HasData orqali oladi.
  *   - bookingUrl mavjud bo'lsa → Place API (aniqroq)
  *   - aks holda → Search API (nom bo'yicha)

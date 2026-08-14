@@ -2299,11 +2299,13 @@ export async function getCompetitorDetail(req, res, next) {
  * Sekin (Booking skreyp) — 45s bilan cheklangan, bo'sh qaytsa eski saqlanadi.
  * @returns {Promise<Array>} roomTypes
  */
-export async function collectCompetitorRooms(competitor, city, { checkIn = null } = {}) {
+/**
+ * @param {object} opts.meta  ixtiyoriy — funksiya qaysi manba ishlaganini
+ *        shu obyektga yozadi (`meta.source`). Chaqiruvchilar uchun majburiy
+ *        emas, shuning uchun qaytish qiymati o'zgarmaydi.
+ */
+export async function collectCompetitorRooms(competitor, city, { checkIn = null, meta = {} } = {}) {
   try {
-    const { scraperEnabled, scraperRooms } = await import('../services/hotelScraper.service.js');
-    if (!scraperEnabled()) return competitor.roomTypes || [];
-
     // Sana berilsa — AYNAN o'sha tun uchun so'raymiz. Ilgari sana umuman
     // uzatilmasdi, shuning uchun xona narxlari bitta noma'lum sana uchun
     // bo'lardi va Rate Shopper jadvalidagi 7 ustunga bog'lanmasdi.
@@ -2313,42 +2315,87 @@ export async function collectCompetitorRooms(competitor, city, { checkIn = null 
       ? { checkIn: ci.toISOString().slice(0, 10), checkOut: co.toISOString().slice(0, 10) }
       : {};
 
-    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('rooms timeout')), 45_000));
-    const sr = await Promise.race([scraperRooms(competitor.name, city || '', dateArgs), timeout]);
-    if (sr?.rooms?.length) {
-      const roomTypes = sr.rooms.slice(0, 10).map((r) => ({
-        name: r.name || 'Room', price: Math.round(r.price || 0), guests: r.guests || 2,
-        roomsLeft: Number.isFinite(r.roomsLeft) ? r.roomsLeft : (Number.isFinite(r.rooms_left) ? r.rooms_left : null),
-      })).filter((r) => r.price > 0);
+    let roomTypes = [];
 
-      if (roomTypes.length) {
-        const sorted = [...roomTypes].sort((a, b) => a.price - b.price);
-
-        // `Competitor.roomTypes` — "eng so'nggi ko'rinish" (sanasiz so'rov yoki
-        // eng yaqin tun). Sana bo'yicha to'liq tarix RoomSnapshot'da.
-        if (!ci) {
-          competitor.roomTypes = roomTypes;
-          competitor.roomsFetchedAt = new Date();
-          await competitor.save().catch(() => {});
+    // ── MANBA 1: HasData Place API ────────────────────────────────────
+    // Strukturaviy JSON, HTML parsing yo'q → 522/timeout muammosi yo'q.
+    // Booking URL kerak; u avvalgi narx yig'ishlarda saqlangan bo'ladi.
+    const bookingUrl = competitor.otaUrls?.['Booking.com'] || competitor.bookingUrl || '';
+    if (bookingUrl) {
+      try {
+        const { hasHasData, getBookingRoomsHasData } = await import('../services/hasdata.service.js');
+        if (hasHasData()) {
+          const hd = await getBookingRoomsHasData({ url: bookingUrl, ...dateArgs });
+          if (hd?.rooms?.length) {
+            roomTypes = hd.rooms;
+            meta.source = 'hasdata';
+          }
         }
-
-        // Sana bo'yicha kesh + occupancy tarixi.
-        try {
-          const RoomSnapshot = (await import('../models/RoomSnapshot.js')).default;
-          const cheapest = sorted[0];
-          await RoomSnapshot.create({
-            competitorId: competitor._id,
-            ownerHotelId: competitor.ownerHotelId,
-            checkIn: ci,
-            rooms: sorted.map((r) => ({ name: r.name, price: r.price, roomsLeft: r.roomsLeft })),
-            minPrice: cheapest.price,
-            minRoomName: cheapest.name,
-            roomsLeft: cheapest.roomsLeft,
-          }).catch(() => {});
-        } catch { /* tarix ixtiyoriy */ }
-
-        return roomTypes;
+      } catch (e) {
+        meta.hasdataError = e.message;
+        console.warn(`[comp-rooms] HasData "${competitor.name}": ${e.message}`);
       }
+    } else {
+      meta.noBookingUrl = true;
+    }
+
+    // ── MANBA 2: skreyper (/v1/rooms) ─────────────────────────────────
+    // Booking sahifasini jonli o'qiydi. Ishonchsizroq (522 beradi), lekin
+    // Booking URL bo'lmaganda yagona yo'l — va u URL'ni ham topib beradi.
+    const { scraperEnabled, scraperRooms } = await import('../services/hotelScraper.service.js');
+    if (!roomTypes.length && scraperEnabled()) {
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('rooms timeout')), 45_000));
+      const sr = await Promise.race([scraperRooms(competitor.name, city || '', dateArgs), timeout])
+        .catch((e) => {
+          meta.scraperError = e.message;
+          console.warn(`[comp-rooms] skreyper "${competitor.name}": ${e.message}`);
+          return null;
+        });
+
+      // Skreyper Booking URL'ini topgan bo'lsa — saqlaymiz, keyingi safar
+      // HasData ishlatiladi va bu sekin yo'lga qaytilmaydi.
+      if (sr?.bookingUrl && !bookingUrl) {
+        competitor.bookingUrl = sr.bookingUrl;
+        competitor.otaUrls = { ...(competitor.otaUrls || {}), 'Booking.com': sr.bookingUrl };
+        await competitor.save().catch(() => {});
+      }
+
+      if (sr?.rooms?.length) {
+        roomTypes = sr.rooms.slice(0, 10).map((r) => ({
+          name: r.name || 'Room', price: Math.round(r.price || 0), guests: r.guests || 2,
+          roomsLeft: Number.isFinite(r.roomsLeft) ? r.roomsLeft : (Number.isFinite(r.rooms_left) ? r.rooms_left : null),
+        })).filter((r) => r.price > 0);
+        if (roomTypes.length) meta.source = 'scraper';
+      }
+    }
+
+    if (roomTypes.length) {
+      const sorted = [...roomTypes].sort((a, b) => a.price - b.price);
+
+      // `Competitor.roomTypes` — "eng so'nggi ko'rinish" (sanasiz so'rov yoki
+      // eng yaqin tun). Sana bo'yicha to'liq tarix RoomSnapshot'da.
+      if (!ci) {
+        competitor.roomTypes = roomTypes;
+        competitor.roomsFetchedAt = new Date();
+        await competitor.save().catch(() => {});
+      }
+
+      // Sana bo'yicha kesh + occupancy tarixi.
+      try {
+        const RoomSnapshot = (await import('../models/RoomSnapshot.js')).default;
+        const cheapest = sorted[0];
+        await RoomSnapshot.create({
+          competitorId: competitor._id,
+          ownerHotelId: competitor.ownerHotelId,
+          checkIn: ci,
+          rooms: sorted.map((r) => ({ name: r.name, price: r.price, roomsLeft: r.roomsLeft })),
+          minPrice: cheapest.price,
+          minRoomName: cheapest.name,
+          roomsLeft: cheapest.roomsLeft,
+        }).catch(() => {});
+      } catch { /* tarix ixtiyoriy */ }
+
+      return roomTypes;
     }
   } catch (e) {
     console.warn(`[comp-rooms] ${competitor?.name}: ${e.message}`);
@@ -2384,6 +2431,19 @@ export async function getCompetitorRoomsByDate(req, res, next) {
     if (Number.isNaN(checkIn.getTime())) {
       return res.status(400).json({ error: 'date noto\'g\'ri' });
     }
+
+    // O'TGAN TUN — Booking ham, HasData ham bo'sh qaytaradi. Skreyp qilish
+    // shunchaki kredit yoqish demak. Jadval sahifasi kechagi ustunlar bilan
+    // ochiq qolgan bo'lsa aynan shu holat yuzaga keladi.
+    const todayUtc = new Date();
+    todayUtc.setUTCHours(0, 0, 0, 0);
+    if (checkIn < todayUtc) {
+      return res.json({
+        competitorId: req.params.id, date: raw, rooms: [],
+        reason: 'past_date', cached: false, fetchedAt: null,
+      });
+    }
+
     const force = req.query.force === 'true';
 
     const RoomSnapshot = (await import('../models/RoomSnapshot.js')).default;
@@ -2406,12 +2466,18 @@ export async function getCompetitorRoomsByDate(req, res, next) {
       }
     }
 
-    const rooms = await collectCompetitorRooms(competitor, myHotel.city, { checkIn });
+    const meta = {};
+    const rooms = await collectCompetitorRooms(competitor, myHotel.city, { checkIn, meta });
+    const list = (rooms || []).map((r) => (r.toObject ? r.toObject() : r));
     res.json({
       competitorId: competitor._id,
       name: competitor.name,
       date: raw,
-      rooms: (rooms || []).map((r) => (r.toObject ? r.toObject() : r)),
+      rooms: list,
+      // Qaysi manba ishladi (hasdata | scraper) — bo'sh natijada esa NEGA
+      // bo'sh ekani. Bu "ma'lumot yo'q" holatini jim qoldirmaydi.
+      source: meta.source || null,
+      reason: list.length ? null : (meta.noBookingUrl ? 'no_booking_url' : 'not_found'),
       fetchedAt: new Date(),
       cached: false,
     });
