@@ -33,6 +33,35 @@ async function ttlIndexes(model) {
   return idx.filter((i) => i.expireAfterSeconds != null);
 }
 
+/**
+ * Indeksni KERAKLI holatga keltiradi.
+ *
+ * `createIndexes()` mavjud indeksni O'ZGARTIRA OLMAYDI — nomi bir xil, opsiyasi
+ * boshqa bo'lsa `IndexOptionsConflict` tashlaydi. Shuning uchun farq bo'lsa
+ * eskisini tushirib, qaytadan yaratamiz.
+ *
+ * @param {number|null} ttlDays  null = TTL bo'lmasin
+ */
+async function ensureIndex(model, key, ttlDays, label) {
+  const coll = model.collection;
+  const name = Object.entries(key).map(([k, v]) => `${k}_${v}`).join('_');
+  const existing = (await coll.indexes()).find((i) => i.name === name);
+
+  const want = ttlDays == null ? null : 60 * 60 * 24 * ttlDays;
+  const have = existing?.expireAfterSeconds ?? null;
+
+  if (existing && have === want) {
+    console.log(`  ✓ ${label}.${name} — allaqachon to'g'ri (${want == null ? 'TTL yo\'q' : `${ttlDays} kun`})`);
+    return;
+  }
+  if (existing) {
+    await coll.dropIndex(name);
+    console.log(`  · ${label}.${name} tushirildi (eski: ${have == null ? 'TTL yo\'q' : `${Math.round(have / 86400)} kun`})`);
+  }
+  await coll.createIndex(key, want == null ? { name } : { name, expireAfterSeconds: want });
+  console.log(`  ✓ ${label}.${name} yaratildi → ${want == null ? 'TTL yo\'q (tarix saqlanadi)' : `${ttlDays} kun`}`);
+}
+
 async function main() {
   await mongoose.connect(env.MONGODB_URI);
   console.log('✓ MongoDB ulandi\n');
@@ -66,6 +95,7 @@ async function main() {
     const ok = days >= 400;
     console.log(`  ${ok ? '✓' : '🟠'} roomsnapshots.${i.name} → ${days} kun${ok ? '' : '  (400 kunga UZAYTIRILADI)'}`);
   }
+  if (!rsTtl.length) console.log('  🟠 roomsnapshots — TTL yo\'q (400 kunlik TTL QO\'SHILADI)');
   console.log('');
 
   if (!APPLY) {
@@ -74,23 +104,15 @@ async function main() {
     return done();
   }
 
-  // ── 2. TTL indekslarini tuzatish ────────────────────────────────────
+  // ── 2. Indekslarni kerakli holatga keltirish ────────────────────────
   console.log('── TUZATISH ───────────────────────────────────────');
-  for (const i of psTtl) {
-    await PriceSnapshot.collection.dropIndex(i.name);
-    console.log(`  ✓ pricesnapshots.${i.name} o'chirildi — tarix endi saqlanadi`);
-  }
-  for (const i of rsTtl) {
-    if (Math.round(i.expireAfterSeconds / 86400) >= 400) continue;
-    // collMod indeksni qayta qurmasdan muddatni o'zgartiradi (tezroq).
-    await mongoose.connection.db.command({
-      collMod: RoomSnapshot.collection.collectionName,
-      index: { name: i.name, expireAfterSeconds: 60 * 60 * 24 * 400 },
-    });
-    console.log(`  ✓ roomsnapshots.${i.name} → 400 kun`);
-  }
 
-  // Model fayllaridagi yangi indekslarni bazaga qo'llash.
+  // Narx tarixi HECH QACHON o'chmasin → TTL bo'lmasin.
+  await ensureIndex(PriceSnapshot, { snapshotAt: 1 }, null, 'pricesnapshots');
+  // Xona tarixi 400 kun (1 yil + zaxira) — mavsumiy taqqoslash uchun.
+  await ensureIndex(RoomSnapshot, { snapshotAt: 1 }, 400, 'roomsnapshots');
+
+  // Qolgan (kompozit) indekslar — bularda to'qnashuv bo'lmaydi.
   await PriceSnapshot.createIndexes();
   await RoomSnapshot.createIndexes();
   await DailyRate.createIndexes();

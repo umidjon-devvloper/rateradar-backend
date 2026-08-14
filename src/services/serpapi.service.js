@@ -66,15 +66,33 @@ function currencyForCountry(countryCode) {
  */
 export async function getSerpApiHotelData(opts) {
   const { propertyToken: savedToken = '' } = opts || {};
+  let serpTried = false;
 
-  // Saqlangan SerpAPI token — o'sha bilan SerpAPI'ga to'g'ridan-to'g'ri.
-  if (savedToken) return getSerpApiHotelDataRaw(opts);
+  // ⚠️ Ilgari shu yerda `if (savedToken) return getSerpApiHotelDataRaw(opts);`
+  // turardi — ya'ni token saqlangan bo'lsa Scrape.do BUTUNLAY chetlab o'tilardi.
+  // Va `getSerpApiHotelDataRaw` SERPAPI_API_KEY yo'q bo'lsa darhol `null`
+  // qaytaradi. Natija:
+  //   • O'Z mehmonxonangizda `serpPropertyToken` saqlangan → SerpAPI'ga borardi
+  //     → null → per-OTA fallback zanjiri → faqat Booking.com narx berardi.
+  //   • RAQIBLARDA token yo'q → Scrape.do Google Hotels → 20+ kanal kelardi.
+  // Shuning uchun "mening hotelim" raqiblardan kambag'al ko'rinardi.
+  //
+  // Endi token — bu TEZ YO'L, chetlab o'tish emas: SerpAPI sozlangan bo'lsa
+  // avval o'sha urinadi, natija bo'sh bo'lsa Scrape.do baribir ishlaydi.
+  if (savedToken && hasSerpApi()) {
+    serpTried = true;
+    const direct = await getSerpApiHotelDataRaw(opts).catch(() => null);
+    if (direct && (direct.lowestPrice > 0 || direct.otaPrices?.length)) return direct;
+  }
 
-  // 1) Scrape.do Google Hotels (asosiy)
+  // 1) Scrape.do Google Hotels (asosiy manba)
   try {
     const { hasScrapedoHotels, getScrapedoHotelData } = await import('./scrapedoHotels.service.js');
     if (hasScrapedoHotels()) {
-      const sd = await getScrapedoHotelData(opts);
+      // propertyToken uzatilmaydi — u SerpAPI identifikatori, Scrape.do uchun
+      // ma'nosiz va noto'g'ri moslikka olib kelishi mumkin.
+      const { propertyToken, ...scrapedoOpts } = opts || {};
+      const sd = await getScrapedoHotelData(scrapedoOpts);
       // Narx yoki OTA kanal kelgan bo'lsa — ishonchli natija.
       if (sd && (sd.lowestPrice > 0 || sd.otaPrices?.length)) {
         return sd;
@@ -84,7 +102,8 @@ export async function getSerpApiHotelData(opts) {
     console.warn('Scrape.do hotels (asosiy) xato, SerpAPI fallback:', err.message);
   }
 
-  // 2) SerpAPI (fallback)
+  // 2) SerpAPI (fallback) — yuqorida urinilmagan bo'lsagina.
+  if (serpTried) return null;
   return getSerpApiHotelDataRaw(opts);
 }
 
