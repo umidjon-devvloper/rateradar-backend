@@ -53,6 +53,22 @@ const schema = z.object({
   GOOGLE_PLACES_REFERER: z.string().optional(),
   MAKCORPS_API_KEY: z.string().optional(),
 
+  // ─── EXELY (Connect API) — mehmonxonaning O'Z bron ma'lumoti ──────────
+  // Multi-tenant: har mijoz o'z client_id/secret'ini Settings orqali kiritadi
+  // va u `Integration` hujjatida SHIFRLANGAN holda saqlanadi. Bu yerdagi
+  // qiymatlar faqat umumiy (barcha ijarachilar uchun bir xil) sozlamalar.
+  //
+  //   • EXELY_BASE_URL — production: https://connect.hopenapi.com
+  //                      test:       https://connect.test.hopenapi.com
+  //   • EXELY_ENC_KEY  — mijoz secret'larini shifrlash kaliti (AES-256-GCM).
+  //       Berilmasa JWT_SECRET'dan scrypt bilan hosil qilinadi — lokalda
+  //       hech narsa sozlamasdan ishlaydi. PRODUCTIONDA ALOHIDA QO'YING:
+  //       kalit almashsa, saqlangan secret'lar o'qib bo'lmaydigan bo'ladi.
+  //   • EXELY_SYNC_ENABLED — cron sinxronizatsiyani o'chirish uchun 'false'.
+  EXELY_BASE_URL: z.string().default('https://connect.hopenapi.com'),
+  EXELY_ENC_KEY: z.string().optional(),
+  EXELY_SYNC_ENABLED: z.enum(['true', 'false']).default('true'),
+
   // ─── Hotels scraper MIKROSERVISI (alohida puppeteer server) ────────────
   // Boshqa BARCHA manba (Google Places, SERP, OSM/Overpass) hotelni topmasa,
   // oxirgi chora sifatida shu skreyper serveriga HTTP so'rov yuboriladi va u

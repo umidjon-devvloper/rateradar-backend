@@ -10,6 +10,7 @@ import { startXoteloMonitor } from './services/xoteloMonitor.service.js';
 import { startSubscriptionRenewal } from './services/subscriptionRenewal.service.js';
 import { startRateHistoryRollup, rollupRecent } from './services/rateHistory.service.js';
 import { initSocket } from './services/socket.service.js';
+import { startExelySync } from './services/exely/sync.service.js';
 
 const require = createRequire(import.meta.url);
 const { initRealtime: initHotelService } = require('./hotelService/mount.js');
@@ -44,6 +45,10 @@ async function start() {
     // Har kuni 04:00 — xom narx snapshotlarini abadiy kunlik tarixga (DailyRate)
     // yig'ish. Bu STLY va booking-curve tahlilining yagona manbai.
     startRateHistoryRollup();
+    // Har 30 daqiqada — mijozlarning Exely (PMS/Channel Manager) bronlarini
+    // olib kelish. Occupancy/ADR/RevPAR AYNAN shu ma'lumotdan hisoblanadi:
+    // raqiblar narxi tashqaridan ko'rinadi, o'z sotuvim esa faqat shundan.
+    startExelySync();
     // Server ishga tushganda ham bir marta — pm2 restart yoki uzilish bo'lsa
     // 04:00 cron'i o'tkazib yuborilgan bo'lishi mumkin (rollup idempotent).
     rollupRecent().then((r) => {

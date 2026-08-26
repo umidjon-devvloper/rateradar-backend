@@ -144,12 +144,18 @@ export async function getOccupancy(req, res, next) {
     const hotel = req.hotel || await Hotel.findOne({ userId: req.user._id });
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
 
-    const { currentOccupancy, hasReportedThisWeek, weekStartOf } =
+    const { resolveOccupancy, hasReportedThisWeek, weekStartOf } =
       await import('../services/occupancy.service.js');
-    const current = currentOccupancy(hotel);
+    const current = await resolveOccupancy(hotel);
+
+    // Exely ulangan bo'lsa to'lish darajasi O'LCHANADI — foydalanuvchidan
+    // qayta so'rash ortiqcha (va yomoni: uning taxmini aniq raqamning
+    // ustiga yozilib qolardi).
+    const fromIntegration = current?.source === 'exely';
+
     res.json({
-      current,                              // {band, weekStart, ageDays} yoki null
-      shouldAsk: !hasReportedThisWeek(hotel), // UI shu haftada so'ramagan bo'lsa so'raydi
+      current,                     // {band, source, occupancyPct?, ...} yoki null
+      shouldAsk: !fromIntegration && !hasReportedThisWeek(hotel),
       weekStart: weekStartOf(),
     });
   } catch (err) { next(err); }
@@ -167,7 +173,7 @@ export async function setOccupancy(req, res, next) {
     const hotel = req.hotel || await Hotel.findOne({ userId: req.user._id });
     if (!hotel) return res.status(404).json({ error: 'Hotel topilmadi' });
 
-    const { upsertReport, currentOccupancy } = await import('../services/occupancy.service.js');
+    const { upsertReport, resolveOccupancy } = await import('../services/occupancy.service.js');
     upsertReport(hotel, String(req.body?.band || ''));
 
     // Keshlangan AI tavsiyasi endi eskirgan — to'lish darajasi tavsiyani
@@ -175,7 +181,7 @@ export async function setOccupancy(req, res, next) {
     hotel.aiOtaAdviceAt = null;
     await hotel.save();
 
-    res.json({ ok: true, current: currentOccupancy(hotel) });
+    res.json({ ok: true, current: await resolveOccupancy(hotel) });
   } catch (err) {
     if (err.status === 400) return res.status(400).json({ error: err.message });
     next(err);

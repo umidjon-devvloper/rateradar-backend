@@ -89,7 +89,7 @@ Faqat JSON qaytar (${langName} tilida):
  * @param channels [{channel, currentPrice, compPrices:[{name,price}], min, max, median, rank, total}]
  * @returns {summary, channels:[{channel, suggestedPrice, action, reason}]}
  */
-export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, channels, lang = 'uz', marketSignal = null }) {
+export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, channels, lang = 'uz', marketSignal = null, performance = null }) {
   const m = getModel();
   if (!m) return { summary: '', channels: [] };
 
@@ -102,13 +102,37 @@ export async function getOtaChannelAdvice({ hotelName, stars = 0, rating = 0, ch
   Statistika: min $${c.min}, max $${c.max}, median $${c.median}${c.currentPrice > 0 ? `, mening o'rnim ${c.rank}/${c.total}` : ''}`;
   }).join('\n\n');
 
+  // ── O'Z KO'RSATKICHLARIM ────────────────────────────────────────────
+  // Shu paytgacha AI faqat raqiblar narxini ko'rardi va tavsiyasi mohiyatan
+  // "raqiblar medianasi" edi. Endi mehmonxonaning HAQIQIY sotuvi ham boradi:
+  // qancha to'lgan, qanchaga sotgan, o'tgan yilga nisbatan qanday ketyapti.
+  //
+  // ⚠️ Barcha qiymatlar DOLLARDA (aiPerformanceContext o'giradi) — prompt
+  // ichidagi kanal narxlari ham dollarda, aralashib ketmasin.
+  const perfText = performance ? `
+SIZNING HAQIQIY KO'RSATKICHLARINGIZ (PMS/Channel Manager'dan olingan, taxmin emas):
+  Xona soni: ${performance.rooms}${performance.capacityEstimated ? ' (taxminiy)' : ''}
+  Oxirgi 30 kun: to'lish ${performance.trailing30.occupancyPct}%, ADR $${performance.trailing30.adrUsd}, RevPAR $${performance.trailing30.revParUsd} (${performance.trailing30.roomNights} xona-tun sotilgan)
+  Kelasi 7 kun: to'lish ${performance.forward7.occupancyPct}% (${performance.forward7.availableRoomNights} dan ${performance.forward7.roomNights} xona-tun band)${performance.pace ? `
+  SUR'AT: o'tgan yilgi shu bosqichga nisbatan ${performance.pace.pctVsLastYear > 0 ? '+' : ''}${performance.pace.pctVsLastYear}% (o'tgan yili shu paytda ${performance.pace.lastYearRoomNights} xona-tun band edi)` : ''}${performance.avgLeadTimeDays != null ? `
+  O'rtacha oldindan bron: ${performance.avgLeadTimeDays} kun${performance.cancellationRate != null ? ` · bekor qilish ${performance.cancellationRate}%` : ''}` : ''}
+` : '';
+
+  // Ko'rsatkichlarni QANDAY o'qish kerakligi — busiz model ikki xatoga
+  // tushadi: (1) ADR ni OTA narxi deb o'ylab "narxni tushir" deydi,
+  // (2) kelasi haftaning past to'lishini vahima signali deb qabul qiladi.
+  const perfRules = performance ? `
+- ADR ($${performance.trailing30.adrUsd}) — bu BARCHA kanallar bo'yicha haqiqatan olingan o'rtacha tun narxi. U OTA e'lon narxidan past bo'lishi NORMAL (to'g'ridan-to'g'ri bronlar, korporativ tariflar, chegirmalar). ADR ni OTA narxi bilan tenglashtirma va "narxni ADR darajasiga tushir" deb tavsiya qilma.
+- Kelasi 7 kunlik past to'lish O'Z-O'ZIDAN xavotir signali EMAS: bu mehmonxonada o'rtacha oldindan bron ${performance.avgLeadTimeDays ?? '~7'} kun, ya'ni tunlar hali sotilmagan. Haqiqiy signal — SUR'AT (o'tgan yilga nisbatan).${performance.pace ? `
+- Sur'at hozir ${performance.pace.pctVsLastYear > 0 ? 'OLDINDA' : 'ORQADA'} (${performance.pace.pctVsLastYear > 0 ? '+' : ''}${performance.pace.pctVsLastYear}%). ${performance.pace.pctVsLastYear >= 15 ? "Talab o'tgan yildan kuchli — narxni ko'tarishga asos bor." : performance.pace.pctVsLastYear <= -15 ? "Talab o'tgan yildan zaif — narx ko'tarish xavfli, avval ko'rinuvchanlik va konversiyani ko'rib chiq." : "Sur'at odatdagidek — faqat raqiblar harakatiga qarab qaror qil."}` : ''}` : '';
+
   const prompt = `Sen hotel revenue manager mutaxassisisan. Quyida mehmonxonaning HAR BIR OTA kanalidagi o'z narxi va raqiblarning AYNAN O'SHA KANALDAGI narxlari berilgan. Har kanal uchun alohida, aniq narx tavsiya qil.
 
 Mehmonxona: ${hotelName}${stars ? ` (${stars}★)` : ''}${rating ? `, reyting ${rating}` : ''}
-${marketSignal?.headline ? `\nNARX SIGNALI (nega raqiblar narx o'zgartirdi): ${marketSignal.headline} ${marketSignal.recommendation}\n` : ''}
+${marketSignal?.headline ? `\nNARX SIGNALI (nega raqiblar narx o'zgartirdi): ${marketSignal.headline} ${marketSignal.recommendation}\n` : ''}${perfText}
 ${chText}
 
-Qoidalar:
+Qoidalar:${perfRules}
 - NARX SIGNALINI hisobga ol: agar BOZOR ko'tarilgan bo'lsa (bir nechta raqib birga) — narx ko'tarish o'rinli. Agar FAQAT BITTA raqib ko'targan bo'lsa (shaxsiy holat) — ko'r-ko'rona takrorlama, o'z bo'sh xonalaringni hisobga ol.
 - Har kanal uchun suggestedPrice — butun son (USD). Raqiblar oralig'iga va mehmonxona darajasiga mos bo'lsin, keskin sakrash qilma (bir qadamda maksimal ~40% o'zgarish).
 - action: "raise" (ko'tarish) | "lower" (tushirish) | "keep" (saqlash).

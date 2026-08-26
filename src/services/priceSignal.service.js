@@ -14,7 +14,7 @@ import RoomSnapshot from '../models/RoomSnapshot.js';
 import DailyRate from '../models/DailyRate.js';
 import Hotel from '../models/Hotel.js';
 import { utcDayStart, getHistoryCoverage } from './rateHistory.service.js';
-import { currentOccupancy } from './occupancy.service.js';
+import { resolveOccupancy } from './occupancy.service.js';
 
 const RISE_PCT = 5;   // shu %dan ortiq o'zgarish "harakat" hisoblanadi
 const DAYS = 14;      // tahlil oynasi
@@ -243,7 +243,9 @@ export async function getPriceSignals(hotelId) {
     analyzeSTLY(hotelId),
     Hotel.findById(hotelId).select('occupancyReports').lean(),
   ]);
-  const ownOccupancy = currentOccupancy(hotel);
+  // Exely ulangan bo'lsa — o'lchangan to'lish, aks holda qo'lda hisobot.
+  // `hotel` bu yerda .lean() bilan olingan, shuning uchun _id ni beramiz.
+  const ownOccupancy = await resolveOccupancy(hotel ? { ...hotel, _id: hotelId } : null);
 
   // O'qiladigan xulosa (AI kontekst + UI uchun).
   let headline = '';

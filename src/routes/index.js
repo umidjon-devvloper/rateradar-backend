@@ -11,6 +11,8 @@ import paymentRoutes from "./payment.routes.js";
 import securityRoutes from "./security.routes.js";
 import hotelServiceSsoRoutes from "./hotelServiceSso.routes.js";
 import leadRoutes from "./lead.routes.js";
+import integrationRoutes from "./integration.routes.js";
+import metricsRoutes from "./metrics.routes.js";
 
 const router = Router();
 
@@ -43,6 +45,10 @@ router.use("/reviews", reviewRoutes);
 router.use("/prices", pricesRoutes);
 router.use("/payments", paymentRoutes);
 router.use("/leads", leadRoutes);
+// Tashqi tizim ulanishlari (Exely PMS/Channel Manager) — har mehmonxona o'ziniki.
+router.use("/integrations", integrationRoutes);
+// O'z ko'rsatkichlarim (occupancy/ADR/RevPAR) — Exely bronlaridan hisoblanadi.
+router.use("/metrics", metricsRoutes);
 router.use("/admin/security", securityRoutes);
 // Mehmonxona-xizmati SSO ko'prigi (/api/hotel-service/sso). Qolgan
 // /api/hotel-service/* marshrutlari CommonJS modulda (app.js'da ulanadi).

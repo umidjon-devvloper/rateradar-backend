@@ -11,7 +11,7 @@ import {
 import { chatSupport, assistantChat, getOtaChannelAdvice, isGeminiEnabled } from "../services/gemini.service.js";
 import PriceSnapshot from "../models/PriceSnapshot.js";
 import { applyAdviceRules, MIN_COMPETITOR_POINTS } from "../services/priceAdvice.rules.js";
-import { currentOccupancy } from "../services/occupancy.service.js";
+import { resolveOccupancy } from "../services/occupancy.service.js";
 import { detectParityBreaches } from "../services/parity.service.js";
 import { channelDisplay, isControllable } from "../config/channels.js";
 import { planAllows } from "../config/plans.js";
@@ -274,7 +274,7 @@ export async function aiOtaAdvice(req, res, next) {
     // Kesh tili sayt tiliga mos bo'lsagina ishlatiladi.
     // Occupancy ham kesh kaliti: foydalanuvchi to'lish darajasini kiritsa yoki
     // hisoboti eskirsa, eski tavsiya (masalan "Ko'tarish") yaroqsiz bo'ladi.
-    const occNow = currentOccupancy(hotel)?.band || null;
+    const occNow = (await resolveOccupancy(hotel))?.band || null;
     if (!refresh && isFresh && hotel.aiOtaAdvice?.channels?.length &&
         (hotel.aiOtaAdvice.lang || 'uz') === reqLang2 &&
         (hotel.aiOtaAdvice.coverage?.occupancyBand ?? null) === occNow) {
@@ -360,6 +360,20 @@ export async function aiOtaAdvice(req, res, next) {
       signal = await getPriceSignals(hotel._id);
     } catch { /* signal ixtiyoriy */ }
 
+    // ── O'Z KO'RSATKICHLARIM (Exely) ─────────────────────────────────
+    // Shu paytgacha AI'ga to'lish darajasi FAQAT `low/mid/high` bandi
+    // sifatida borardi — uch xil holatdan biri. Endi aniq raqamlar ham
+    // boradi: ADR, RevPAR, kelasi hafta bandligi va o'tgan yilga nisbatan
+    // sur'at. Exely ulanmagan mijozda `null` qoladi va prompt o'zgarishsiz
+    // ishlaydi — ya'ni bu qo'shimcha, majburiyat emas.
+    let performance = null;
+    try {
+      const { aiPerformanceContext } = await import('../services/metrics/ownMetrics.service.js');
+      performance = await aiPerformanceContext(hotel._id);
+    } catch (e) {
+      console.warn('[ai] ko\'rsatkichlar konteksti olinmadi:', e.message);
+    }
+
     // AI'ga FAQAT tavsiya berish mumkin bo'lgan kanallarni yuboramiz:
     //   • kanalda narx belgilay olasiz (OTA yoki o'z saytingiz)
     //   • o'z narxingiz ma'lum
@@ -381,6 +395,7 @@ export async function aiOtaAdvice(req, res, next) {
         channels: adviceCandidates,
         lang,
         marketSignal: signal ? { headline: signal.headline, recommendation: signal.recommendation } : null,
+        performance,
       })
       : { summary: '', channels: [] };
 
@@ -420,7 +435,10 @@ export async function aiOtaAdvice(req, res, next) {
     const result = {
       summary: ai.summary || '',
       channels: merged.filter((c) => c.suggestedPrice > 0 || c.currentPrice > 0),
-      coverage,
+      // Ko'rsatkichlar qamrovga qo'shiladi: tavsiya AI'ga QANDAY ma'lumot
+      // bilan berilgani ochiq ko'rinsin (UI ham, nosozlik qidiruvi ham
+      // "AI nimaga qarab shunday dedi" savoliga javob topa olsin).
+      coverage: { ...coverage, performance },
       parity,
       engine: 'gemini',
       lang,
