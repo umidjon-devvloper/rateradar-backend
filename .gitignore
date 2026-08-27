@@ -1,15 +1,50 @@
+# ════════════════════════════════════════════════════
+# Bog'liqliklar va build
+# ════════════════════════════════════════════════════
 node_modules/
-.env
-.env.local
-*.log
-.DS_Store
 dist/
 build/
 coverage/
-.vscode/
-.idea/
 
+# ════════════════════════════════════════════════════
+# MAXFIY QIYMATLAR — bu yerga tushgan narsa GitHub'ga ketmasin
+#
+# `.env*` barcha variantni qamraydi (.env.production, .env.local,
+# .env.test va h.k.). `.env.example` esa ATAYIN kuzatiladi — u
+# namuna, ichida qiymat yo'q, faqat kalit nomlari.
+# ════════════════════════════════════════════════════
+.env
+.env.*
+!.env.example
+
+# Sertifikat va kalit fayllari
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ════════════════════════════════════════════════════
+# Ish vaqtida hosil bo'ladigan ma'lumot
+# ════════════════════════════════════════════════════
+# Mehmonxona-xizmati va boshqa modullar yuklagan rasmlar.
+# Bular foydalanuvchi kontenti — repoda emas, serverda/S3'da turishi kerak.
+uploads/
+
+# GeoNames dump va shunga o'xshash og'ir ma'lumot fayllari (1.7 GB gacha)
 src/data/
 
-node_modules/
-.env
+*.log
+npm-debug.log*
+yarn-error.log*
+tmp/
+.cache/
+*.sqlite
+*.sqlite3
+
+# ════════════════════════════════════════════════════
+# OS va muharrir
+# ════════════════════════════════════════════════════
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
