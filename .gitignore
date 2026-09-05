@@ -1,50 +1,33 @@
-# ════════════════════════════════════════════════════
-# Bog'liqliklar va build
-# ════════════════════════════════════════════════════
 node_modules/
-dist/
-build/
-coverage/
 
-# ════════════════════════════════════════════════════
-# MAXFIY QIYMATLAR — bu yerga tushgan narsa GitHub'ga ketmasin
-#
-# `.env*` barcha variantni qamraydi (.env.production, .env.local,
-# .env.test va h.k.). `.env.example` esa ATAYIN kuzatiladi — u
-# namuna, ichida qiymat yo'q, faqat kalit nomlari.
-# ════════════════════════════════════════════════════
+# ── Maxfiy sozlamalar ────────────────────────────────────────────────
+# BARCHA .env variantlari yopiladi, .env.example esa ATAYIN ochiq
+# qoldiriladi — u namuna, ichida qiymat yo'q.
 .env
 .env.*
 !.env.example
 
-# Sertifikat va kalit fayllari
+# Kalit va sertifikat fayllari — hech qachon repoga tushmasin.
 *.pem
 *.key
 *.p12
 *.pfx
 
-# ════════════════════════════════════════════════════
-# Ish vaqtida hosil bo'ladigan ma'lumot
-# ════════════════════════════════════════════════════
-# Mehmonxona-xizmati va boshqa modullar yuklagan rasmlar.
-# Bular foydalanuvchi kontenti — repoda emas, serverda/S3'da turishi kerak.
+# ── Ishlash paytida hosil bo'ladigan ─────────────────────────────────
+# uploads/ — mehmonxona yuklagan rasmlar (hotel-service item'lari).
+# Serverda hosil bo'ladi, git'da saqlanmaydi.
 uploads/
-
-# GeoNames dump va shunga o'xshash og'ir ma'lumot fayllari (1.7 GB gacha)
-src/data/
-
+dist/
+build/
+coverage/
 *.log
-npm-debug.log*
-yarn-error.log*
 tmp/
 .cache/
-*.sqlite
-*.sqlite3
 
-# ════════════════════════════════════════════════════
-# OS va muharrir
-# ════════════════════════════════════════════════════
+# Shahar bazasi dumpi (1.7GB) — CITIES_SOURCE=api bilan kerak emas.
+src/data/
+
+# ── Muhit ───────────────────────────────────────────────────────────
 .DS_Store
-Thumbs.db
 .vscode/
 .idea/
